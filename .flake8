@@ -1,0 +1,5 @@
+[flake8]
+exclude = env,docs,.vscode,.pytest_cache,.git,__pycache__
+max-line-length = 88
+extend-ignore = E203,E701,E501
+max-complexity = 10
