@@ -1,5 +1,7 @@
 import importlib
-from typing import Any, Type
+from types import UnionType
+from typing import Any, Type, get_origin, get_args, TypeVar, TypeGuard, Union
+
 
 # from copy import deepcopy
 # from typing import Any, Callable, Generic, ParamSpec, Type, TypeVar
@@ -12,12 +14,14 @@ from typing import Any, Type
 # B = TypeVar("B")
 
 
+V = TypeVar("V")
+
+
 class MissingType:
     pass
 
 
 Missing = MissingType()
-AllowedTypes = int | float | str
 
 
 # class Lazy(Generic[T, P]):
@@ -156,18 +160,7 @@ def get_class_init_signature(
         value = bound.arguments.get(
             param_name, param.default if param.default != _empty else Missing
         )
-        annotation = param.annotation if param.annotation != _empty else MissingType
-
-        if (
-            annotation is not MissingType
-            and value is not Missing
-            and not isinstance(value, annotation)
-        ):
-            raise TypeError(
-                f"Argument {param_name}={value} is annotated "
-                f"with {annotation}, "
-                f"but the default value has type {type(value)} "
-            )
+        annotation = param.annotation if param.annotation != _empty else MissingType          
 
         values[param_name] = value
         annotations[param_name] = annotation
@@ -198,35 +191,31 @@ def create_dict_from_class_init_args(cls, *args, **kwargs):
         AssertionError: If to_dict returns a dictionary with non-string keys
             or non-allowed values.
     """
-    values, _ = get_class_init_signature(cls, *args, **kwargs)
+    values, annotations = get_class_init_signature(cls, *args, **kwargs)
 
     result: dict[str, Any] = {"_type": get_class_import_path(cls)}
 
     for name, value in values.items():
+        annotation = annotations[name]
 
         if value is Missing:
             continue
 
-        if isinstance(value, AllowedTypes):
+        # TODO
+        if isinstance(value, Lazy | Parsable):
+            result[name] = value.to_dict()
+        elif was_instance:=_isinstance(value, annotation):
+            # raise if not allowed, return False if mismatched, true if ok
             result[name] = value
-        elif hasattr(value, "to_dict"):
-            dct = value.to_dict()
-
-            # TODO: We currently support only one level of nesting.
-            # To support deeper nesting, we need to recursively check
-            # the types of the values.
-            assert all(
-                isinstance(k, str) for k in dct.keys()
-            ), f"Keys of {dct=} are not strings"
-            assert all(
-                isinstance(v, AllowedTypes) for v in dct.values()
-            ), f"Values of {dct=} are not {AllowedTypes}"
-
-            result[name] = dct
         else:
-            raise TypeError(
-                f"Type is not {AllowedTypes} and does not implement to_dict()"
-            )
+            if not was_instance:
+                raise TypeError(
+                    f"{value=} is not an instance of {annotation}"
+                )
+            else:
+                raise TypeError(
+                    f"Type {annotation} is not Lazy or Parsable. "
+                )
 
     return result
 
@@ -244,6 +233,46 @@ def import_class_from_path(path: str) -> Type:
     except AttributeError:
         raise ImportError(f"Could not import {cls_name} from {module_name}")
     return cls
+
+
+BasicTypes = int | float | bool | str
+MAX_LEVEL = 2
+
+
+def _isinstance(value: Any, typ: Type[V], level: int = 0) -> TypeGuard[V]:
+    if level > MAX_LEVEL:
+        raise
+
+    assert not _is_union(typ)
+
+    if isinstance(value, BasicTypes):
+        if get_origin(typ) is not None:
+            raise
+
+        return isinstance(value, typ)
+    elif isinstance(value, list | tuple):
+        outer = get_origin(typ)
+
+        # untyped list or tuple not allowed
+        if outer is None:
+            raise
+
+        if outer not in (list, tuple):
+            raise
+        
+        inner = get_args(typ) if outer == tuple else [get_args(typ)[0]]*len(value)
+        assert len(inner) == len(value)
+        return all(
+            _isinstance(item, inner_typ, level+1)
+            for item, inner_typ in zip(value, inner)
+        )
+    else:
+        raise
+
+
+def _is_union(typ) -> bool:
+    outer = get_origin(typ)
+    return outer is Union or outer is UnionType
 
 
 # class SomeOther(nn.Module, Parsable):
