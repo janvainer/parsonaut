@@ -198,14 +198,13 @@ def create_dict_from_class_init_args(cls, *args, **kwargs):
         AssertionError: If to_dict returns a dictionary with non-string keys
             or non-allowed values.
     """
-    values, annotations = get_class_init_signature(cls, *args, **kwargs)
+    values, _ = get_class_init_signature(cls, *args, **kwargs)
 
     result: dict[str, Any] = {"_type": get_class_import_path(cls)}
 
     for name, value in values.items():
-        annotation = annotations[name]
 
-        if value is Missing or annotation is Missing:
+        if value is Missing:
             continue
 
         if isinstance(value, AllowedTypes):
