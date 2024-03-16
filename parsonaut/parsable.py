@@ -1,20 +1,34 @@
 import importlib
+from builtins import Ellipsis
+from copy import deepcopy
 from types import UnionType
-from typing import Any, Type, get_origin, get_args, TypeVar, TypeGuard, Union
+from typing import (
+    Any,
+    Callable,
+    Generic,
+    NamedTuple,
+    ParamSpec,
+    Type,
+    TypedDict,
+    TypeGuard,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+)
 
-
-# from copy import deepcopy
 # from typing import Any, Callable, Generic, ParamSpec, Type, TypeVar
 
 
-# T = TypeVar("T" , bound="Parsable")
-# P = ParamSpec("P")
+T = TypeVar("T")  # , bound="Parsable")
+P = ParamSpec("P")
 
 # A = ParamSpec("A")
 # B = TypeVar("B")
 
 
 V = TypeVar("V")
+BasicType = int | float | bool | str
 
 
 class MissingType:
@@ -24,40 +38,98 @@ class MissingType:
 Missing = MissingType()
 
 
-# class Lazy(Generic[T, P]):
-#     def __init__(
-#         self, cls: Type[T] | Callable[P, T],
-#         *args: P.args, **kwargs: P.kwargs
-#     ):
-#         self.cls = cls
-#         self.args = args
-#         self.kwargs = kwargs
+class AnnotatedDict(TypedDict):
+    _type: Type
+    value: "Any | AnnotatedDict"
 
-#         self._cfg = create_dict_from_class_init_args(cls, *args, **kwargs)
 
-#     def __eq__(self, other: "Lazy") -> bool:
-#         assert isinstance(other, Lazy)
-#         return self._cfg == other._cfg
+class Lazy(Generic[T, P]):
+    def __init__(
+        self, cls: Type[T] | Callable[P, T], *args: P.args, **kwargs: P.kwargs
+    ):
+        # Best effort to ensure that non-lazy objects are not passed to Lazy as values.
+        # If the user passes e.g. an initialized torch model, it would slow down imports and ramp up mem usage.
+        # We do not recurse into containers as it could slow down imports for larger projects.
+        # Container-related and type-related issues are handled during parsing.
+        signature = get_class_init_signature(cls, *args, **kwargs)
+        LazyType = int | float | str | bool | list | tuple | Lazy
+        for item in signature:
+            if item.value is not Missing:
+                assert isinstance(item.value, LazyType), (
+                    f"Only {LazyType} are allowed as values provided to Lazy, "
+                    f"but received type {type(item.value)} for {item.name}"
+                )
 
-#     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
-#         assert not args
-#         kwargs.update(self.kwargs)
-#         return self.cls(*self.args, **kwargs)
+        self.cls = cls
+        self.args = args
+        self.kwargs = kwargs
+        self.signature = signature
 
-#     @classmethod
-#     def from_dict(cls, dct) -> "Lazy":
-#         dct = deepcopy(dct)
-#         pth: str = dct.pop("_type")
-#         class_ = import_class_from_path(pth)
+    def to_annotated_dict(self) -> AnnotatedDict:
+        result: dict[str, Any] = {}
 
-#         kwargs = dict()
-#         for k, v in dct.items():
-#             if isinstance(v, dict) and "_type" in v:
-#                 kwargs[k] = Lazy.from_dict(v)
-#             else:
-#                 kwargs[k] = v
+        for sig in self.signature:
+            match sig:
+                case (_, typ, _) if _is_union(typ):
+                    raise NotImplementedError()
+                case (name, typ, MissingType()):
+                    if _is_parsable_type(typ):
+                        result[name] = {
+                            "_type": typ,
+                            "value": Missing,
+                        }
+                case (name, typ, value) if typ == MissingType:
+                    if isinstance(value, BasicType):
+                        result[name] = {
+                            "_type": type(value),
+                            "value": value,
+                        }
+                case (name, _, Lazy()):
+                    result[name] = sig.value.to_annotated_dict()
+                case (name, typ, value):
+                    assert _is_parsable_type(
+                        typ
+                    ), f"Provided annotation for {name}: {typ} is not parsable."
+                    assert _isinstance_of_parsable_type(
+                        value, typ
+                    ), f"Provided value {name}={value} does not match the provided annotation {name}: {typ}"
+                    result[name] = {
+                        "_type": typ,
+                        "value": value,
+                    }
 
-#         return Lazy(class_, **kwargs)
+                case _:
+                    raise
+
+        return {
+            "_type": self.cls,
+            "value": result,
+        }
+
+    #     def __eq__(self, other: "Lazy") -> bool:
+    #         assert isinstance(other, Lazy)
+    #         return self._cfg == other._cfg
+
+    #     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
+    #         assert not args
+    #         kwargs.update(self.kwargs)
+    #         return self.cls(*self.args, **kwargs)
+
+    # @classmethod
+    # def from_dict(cls, dct) -> "Lazy":
+    #     dct = deepcopy(dct)
+    #     pth: str = dct.pop("_type")
+    #     class_ = import_class_from_path(pth)
+
+    #     kwargs = dict()
+    #     for k, v in dct.items():
+    #         if isinstance(v, dict) and "_type" in v:
+    #             kwargs[k] = Lazy.from_dict(v)
+    #         else:
+    #             kwargs[k] = v
+
+    #     return Lazy(class_, **kwargs)
+
 
 #     def to_dict(self) -> dict[str, Any]:
 #         return self._cfg
@@ -110,35 +182,30 @@ Missing = MissingType()
 #         return self
 
 
-Default = Any | MissingType
-Annotation = Type | Type[MissingType]
+class Signature(NamedTuple):
+    name: str
+    annotation: Type | Type[MissingType]
+    value: Any | MissingType
 
 
-def get_class_init_signature(
-    cls, *args, **kwargs
-) -> tuple[dict[str, Default], dict[str, Annotation]]:
-    """Get the signature of a class, including defaults and annotations.
+def get_class_init_signature(cls, *args, **kwargs) -> tuple[Signature, ...]:
+    """Get the signature of a class's __init__ method.
 
-    This function retrieves the signature of a class's `__init__` method,
+    This function retrieves the signature of a class's __init__ method,
     including the default values and annotations of its parameters.
     If a default value or annotation is not available, it is replaced with `Missing`.
-    If an argument type does not match the annotation, a `TypeError` is raised.
 
     Args:
         cls: The class for which to retrieve the signature.
-        *args: Positional arguments to be passed to the `__init__` method.
-        **kwargs: Keyword arguments to be passed to the `__init__` method.
+        *args: Positional arguments to be passed to the __init__ method.
+        **kwargs: Keyword arguments to be passed to the __init__ method.
 
     Returns:
-        A tuple containing two dictionaries:
-        - The first dictionary contains the values of the parameters
-            passed to the `__init__` method, including any default values.
-        - The second dictionary contains the annotations of the parameters
-            passed to the `__init__` method, including any missing annotations.
+        A tuple of Signature instances, each containing the name, annotation,
+        and value of a parameter.
 
     Raises:
-        TypeError: If an argument type does not match the annotation.
-        AssertionError: If the `__init__` method does not have a `self` parameter.
+        AssertionError: If the __init__ method does not have a 'self' parameter.
 
     """
     from inspect import _empty, signature
@@ -151,8 +218,7 @@ def get_class_init_signature(
         "self" in bound.signature.parameters
     ), f"The {cls=} does not have a __init__ method with a 'self' parameter."
 
-    values = dict()
-    annotations = dict()
+    ret = []
     for param_name, param in bound.signature.parameters.items():
         if param_name == "self":
             continue
@@ -160,64 +226,11 @@ def get_class_init_signature(
         value = bound.arguments.get(
             param_name, param.default if param.default != _empty else Missing
         )
-        annotation = param.annotation if param.annotation != _empty else MissingType          
+        annotation = param.annotation if param.annotation != _empty else MissingType
 
-        values[param_name] = value
-        annotations[param_name] = annotation
+        ret.append(Signature(param_name, annotation, value))
 
-    return (values, annotations)
-
-
-def create_dict_from_class_init_args(cls, *args, **kwargs):
-    """
-    Create a dictionary representation of the class initialization arguments.
-
-    Args:
-        cls: The class for which to create the dictionary.
-        *args: Positional arguments passed to the class constructor.
-            Must match the class signature.
-        **kwargs: Keyword arguments passed to the class constructor.
-            Must match the class signature.
-
-    The class signature may contain non-allowed types, but the objects
-    must implement `to_dict() -> dict[str, AllowedTypes]`.
-
-    Returns:
-        A dictionary representation of the class initialization arguments.
-
-    Raises:
-        TypeError: If the type of an argument is not an allowed type
-            and does not implement `to_dict()`.
-        AssertionError: If to_dict returns a dictionary with non-string keys
-            or non-allowed values.
-    """
-    values, annotations = get_class_init_signature(cls, *args, **kwargs)
-
-    result: dict[str, Any] = {"_type": get_class_import_path(cls)}
-
-    for name, value in values.items():
-        annotation = annotations[name]
-
-        if value is Missing:
-            continue
-
-        # TODO
-        if isinstance(value, Lazy | Parsable):
-            result[name] = value.to_dict()
-        elif was_instance:=_isinstance(value, annotation):
-            # raise if not allowed, return False if mismatched, true if ok
-            result[name] = value
-        else:
-            if not was_instance:
-                raise TypeError(
-                    f"{value=} is not an instance of {annotation}"
-                )
-            else:
-                raise TypeError(
-                    f"Type {annotation} is not Lazy or Parsable. "
-                )
-
-    return result
+    return tuple(ret)
 
 
 def get_class_import_path(cls: Type) -> str:
@@ -235,44 +248,54 @@ def import_class_from_path(path: str) -> Type:
     return cls
 
 
-BasicTypes = int | float | bool | str
-MAX_LEVEL = 2
-
-
-def _isinstance(value: Any, typ: Type[V], level: int = 0) -> TypeGuard[V]:
-    if level > MAX_LEVEL:
-        raise
-
-    assert not _is_union(typ)
-
-    if isinstance(value, BasicTypes):
-        if get_origin(typ) is not None:
-            raise
-
+def _isinstance_of_parsable_type(value: Any, typ: Type) -> bool:
+    if isinstance(value, BasicType):
         return isinstance(value, typ)
     elif isinstance(value, list | tuple):
         outer = get_origin(typ)
 
-        # untyped list or tuple not allowed
-        if outer is None:
-            raise
-
-        if outer not in (list, tuple):
-            raise
-        
-        inner = get_args(typ) if outer == tuple else [get_args(typ)[0]]*len(value)
+        inner = get_args(typ) if outer == tuple else [get_args(typ)[0]] * len(value)
         assert len(inner) == len(value)
         return all(
-            _isinstance(item, inner_typ, level+1)
+            _isinstance_of_parsable_type(item, inner_typ)
             for item, inner_typ in zip(value, inner)
         )
     else:
         raise
 
 
+def _is_parsable_type(typ: Type, level=0) -> bool:
+
+    if level > 2:
+        return False
+
+    if _is_union(typ):
+        return False
+
+    return _is_basic_type(typ) or _is_parsable_container(typ, level)
+
+
 def _is_union(typ) -> bool:
     outer = get_origin(typ)
     return outer is Union or outer is UnionType
+
+
+def _is_basic_type(typ) -> bool:
+    return typ in (int, float, bool, str)
+
+
+def _is_parsable_container(typ, level=0) -> bool:
+    outer = get_origin(typ)
+
+    # untyped list or tuple not allowed
+    if outer is None:
+        return False
+
+    if outer not in (list, tuple):
+        return False
+
+    inner = get_args(typ)
+    return all(_is_parsable_type(i, level + 1) for i in inner if i != Ellipsis)
 
 
 # class SomeOther(nn.Module, Parsable):

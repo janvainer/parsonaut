@@ -1,5 +1,8 @@
+from .parsable import Lazy
+
+
 class DummyFlat:
-    def __init__(self, a, b: str | int, c: float = 3.14):
+    def __init__(self, a, b: str, c: float = 3.14):
         self.a = a
         self.b = b
         self.c = c
@@ -14,7 +17,7 @@ class DummyFlat:
 
 
 class DummyNested:
-    def __init__(self, a: DummyFlat, b: str, c: float = 3.14):
+    def __init__(self, a: Lazy[DummyFlat, ...], b: str, c: float = 3.14):
         self.a = a
         self.b = b
         self.c = c
