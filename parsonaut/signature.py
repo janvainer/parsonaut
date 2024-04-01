@@ -9,6 +9,7 @@ Missing = MissingType()
 
 
 def get_signature(func: Callable, *args, **kwargs) -> dict[str, tuple[Type, Any]]:
+    """Get the signature of a function, including the types of the arguments."""
     from inspect import _empty, signature
 
     sig = signature(func)
