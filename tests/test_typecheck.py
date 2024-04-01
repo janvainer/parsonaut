@@ -10,6 +10,7 @@ from parsonaut.typecheck import (
     is_float_type,
     is_int_type,
     is_nested_tuple_type,
+    is_parsable_type,
     is_str_type,
 )
 
@@ -134,3 +135,17 @@ def test_get_flat_tuple_inner_type_raises_on_invalid_cases():
 
     with pytest.raises(AssertionError):
         get_flat_tuple_inner_type(tuple[str, int])
+
+
+@pytest.mark.parametrize(
+    "typ",
+    BASIC_TYPES,
+)
+def test_is_parsable_type_accepts(typ):
+    assert is_parsable_type(typ)
+    assert is_parsable_type(tuple[typ])
+    assert is_parsable_type(tuple[typ, typ])
+    assert is_parsable_type(tuple[typ, ...])
+    assert is_parsable_type(tuple[tuple[typ, typ]])
+    assert is_parsable_type(tuple[tuple[typ, ...]])
+    assert is_parsable_type(tuple[tuple[typ, ...], ...])

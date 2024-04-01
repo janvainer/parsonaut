@@ -44,6 +44,19 @@ def is_nested_tuple_type(typ: Type) -> bool:
     )
 
 
+def is_parsable_type(typ: Type) -> bool:
+    return any(
+        (
+            is_int_type(typ),
+            is_float_type(typ),
+            is_bool_type(typ),
+            is_str_type(typ),
+            is_flat_tuple_type(typ),
+            is_nested_tuple_type(typ),
+        )
+    )
+
+
 def get_flat_tuple_inner_type(typ: Type[tuple]) -> tuple[Type, int]:
     args = get_args(typ)
     assert len(args) > 0
