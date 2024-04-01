@@ -17,22 +17,34 @@ from parsonaut.typecheck import (
 
 def test_is_float_type():
     assert is_float_type(float)
+    assert is_float_type(float, 1.0)
+
     assert not is_float_type(int)
+    assert not is_float_type(float, 1)
 
 
 def test_is_int_type():
     assert is_int_type(int)
+    assert is_int_type(int, 1)
+    assert is_int_type(int, True)  # isinstance(True, int) == True
+
     assert not is_int_type(float)
+    assert not is_int_type(int, 1.0)
 
 
 def test_is_bool_type():
     assert is_bool_type(bool)
+    assert is_bool_type(bool, True)
+    assert not is_bool_type(bool, 0)
+    assert not is_bool_type(bool, 1)
     assert not is_bool_type(int)
 
 
 def test_is_str_type():
     assert is_str_type(str)
+    assert is_str_type(str, "hello")
     assert not is_str_type(int)
+    assert not is_str_type(str, 1)
 
 
 @pytest.mark.parametrize(
@@ -45,6 +57,12 @@ def test_is_flat_tuple_type_accepts_base_types(
     assert is_flat_tuple_type(tuple[inner_typ])
     assert is_flat_tuple_type(tuple[inner_typ, inner_typ])
     assert is_flat_tuple_type(tuple[inner_typ, ...])
+
+    val = inner_typ()
+    assert is_flat_tuple_type(tuple[inner_typ], (val,))
+    assert is_flat_tuple_type(tuple[inner_typ, inner_typ], (val, val))
+    assert is_flat_tuple_type(tuple[inner_typ, ...], (val,))
+    assert is_flat_tuple_type(tuple[inner_typ, ...], (val, val, val))
 
 
 @pytest.mark.parametrize(
@@ -68,6 +86,14 @@ def test_is_flat_tuple_type_rejects_nested_tuple():
     assert not is_flat_tuple_type(tuple[tuple[int, int, int]])
 
 
+def test_is_flat_tuple_type_rejects_mismatched_values():
+    assert not is_flat_tuple_type(tuple[int], (1.0,))
+    assert not is_flat_tuple_type(tuple[int], tuple())
+    assert not is_flat_tuple_type(tuple[int], (1, 1))
+    assert not is_flat_tuple_type(tuple[int, int], (1, 1.0))
+    assert not is_flat_tuple_type(tuple[int, ...], (1, 1.0))
+
+
 @pytest.mark.parametrize(
     "inner_typ",
     BASIC_TYPES,
@@ -79,6 +105,14 @@ def test_is_nested_tuple_type_accepts_base_types(
     assert is_nested_tuple_type(tuple[tuple[inner_typ, inner_typ]])
     assert is_nested_tuple_type(tuple[tuple[inner_typ, ...]])
     assert is_nested_tuple_type(tuple[tuple[inner_typ, ...], ...])
+
+    val = inner_typ()
+    assert is_nested_tuple_type(tuple[tuple[inner_typ]], ((val,),))
+    assert is_nested_tuple_type(tuple[tuple[inner_typ, inner_typ]], ((val, val),))
+    assert is_nested_tuple_type(tuple[tuple[inner_typ, ...]], ((val, val, val),))
+    assert is_nested_tuple_type(
+        tuple[tuple[inner_typ, ...], ...], ((val, val), (val, val))
+    )
 
 
 @pytest.mark.parametrize(
@@ -101,12 +135,23 @@ def test_is_nested_tuple_type_rejects_non_tuple():
 
 
 def test_is_nested_tuple_type_rejects_too_deeply_nested_tuple():
-    assert not is_flat_tuple_type(tuple[tuple[tuple[int]]])
+    assert not is_nested_tuple_type(tuple[tuple[tuple[int]]])
 
 
 def test_is_nested_tuple_type_rejects_non_consistent_subtypes():
-    assert not is_flat_tuple_type(tuple[tuple[int], int])
-    assert not is_flat_tuple_type(tuple[tuple[int], tuple[int]])
+    assert not is_nested_tuple_type(tuple[tuple[int], int])
+    assert not is_nested_tuple_type(tuple[tuple[int], tuple[int]])
+
+
+def test_is_nested_tuple_type_rejects_mismatched_values():
+    assert not is_nested_tuple_type(tuple[tuple[int]], ((1.0,),))
+    assert not is_nested_tuple_type(tuple[tuple[int]], tuple())
+    assert not is_nested_tuple_type(tuple[tuple[int]], tuple(tuple()))
+    assert not is_nested_tuple_type(tuple[tuple[int]], ((1, 1),))
+    assert not is_nested_tuple_type(tuple[tuple[int]], ((1,), (1,)))
+    assert not is_nested_tuple_type(tuple[tuple[int, int]], (1, 1.0))
+    assert not is_nested_tuple_type(tuple[tuple[int, ...]], ((1, 1.0),))
+    assert not is_nested_tuple_type(tuple[tuple[int, ...], ...], ((1, 1), (1,)))
 
 
 def test_get_flat_tuple_inner_type_accepted_cases():
