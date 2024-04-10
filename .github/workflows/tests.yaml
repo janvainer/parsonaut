@@ -25,7 +25,7 @@ jobs:
         python -m pip install --upgrade pip '.[tests]'
     - name: Run tests
       run: |
-        pytest --cov
+        pytest --cov=parsonaut
     - name: Upload coverage report
       run: |
         codecov

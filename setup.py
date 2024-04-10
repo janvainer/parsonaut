@@ -11,6 +11,7 @@ tests_require = [
     "black==24.2.0",
     "isort==5.13.2",
     "coverage==7.4.3",
+    "codecov==2.1.13",
     "pre-commit==3.6.2",
 ]
 
