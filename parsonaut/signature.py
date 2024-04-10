@@ -176,7 +176,7 @@ class Signature(Generic[T, P]):
                         for k, (t, v) in self.signature.items()
                     },
                     **kwargs,
-                }
+                },
             )
         else:
             return self.cls(  # type: ignore
@@ -184,7 +184,7 @@ class Signature(Generic[T, P]):
                 **{  # type: ignore
                     **self.to_dict(recursive=False),
                     **kwargs,
-                }
+                },
             )
 
 
