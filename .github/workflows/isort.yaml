@@ -22,7 +22,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install isort
       run: |
-        python -m pip install --upgrade pip isort==5.10.1
+        python -m pip install --upgrade pip isort==5.13.2
     - name: Check that imports are sorted
       run: |
         isort parsonaut --check --diff --profile=black
