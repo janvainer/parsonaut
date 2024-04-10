@@ -58,10 +58,10 @@ def test_get_class_init_signature_nested():
 
 def test_set_typecheck_eagerly():
     set_typecheck_eager(True)
-    assert should_typecheck_eagerly() == True
+    assert should_typecheck_eagerly() is True
 
     set_typecheck_eager(False)
-    assert should_typecheck_eagerly() == False
+    assert should_typecheck_eagerly() is False
 
     # Set to default so that other tests work fine
     set_typecheck_eager()
