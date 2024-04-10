@@ -25,4 +25,7 @@ jobs:
         python -m pip install --upgrade pip '.[tests]'
     - name: Run tests
       run: |
-        pytest
+        pytest --cov
+    - name: Upload coverage report
+      run: |
+        codecov
