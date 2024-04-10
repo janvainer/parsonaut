@@ -35,12 +35,20 @@ class Signature(Generic[T, P]):
         | tuple[type[float], float]
     )
 
-    def __init__(self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]) -> None:
+    def __init__(
+        self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]
+    ) -> None:
         self.cls = cls
         self._signature = signature
 
     def __hash__(self) -> int:
-        return hash(tuple(flatten(self.to_dict(with_annotations=True, with_class_tag=True)).items()))
+        return hash(
+            tuple(
+                flatten(
+                    self.to_dict(with_annotations=True, with_class_tag=True)
+                ).items()
+            )
+        )
 
     def __eq__(self, __value: "object | Signature") -> bool:
         return hash(self) == hash(__value)
@@ -55,7 +63,7 @@ class Signature(Generic[T, P]):
     def from_class(
         cl: Type[B] | Callable[A, B], *args: A.args, **kwargs: A.kwargs
     ) -> "Signature[B, A]":
-        
+
         if should_typecheck_eagerly():
             sig = Signature.get_signature(cl, *args, **kwargs)
             return Signature(cl, sig)
@@ -112,7 +120,7 @@ class Signature(Generic[T, P]):
         self,
         recursive: bool = True,
         with_annotations: bool = False,
-        with_class_tag: bool = False
+        with_class_tag: bool = False,
     ):
         dct = dict()
         if with_class_tag:
@@ -233,5 +241,5 @@ def flatten(dct):
                     k = f"{prefix}.{k}"
                 out.append((k, v))
         return out
-            
+
     return dict(_flatten(dct, ""))
