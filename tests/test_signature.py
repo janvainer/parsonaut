@@ -165,7 +165,7 @@ def test_Signature_skips_nonparsable_without_defaults():
 
 def test_Signature_fails_if_provided_with_non_parsable_default():
     class DummyFlat(Signature):
-        def __init__(self, a: list[str] = [1]):
+        def __init__(self, a: list[str] = [1]):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):
@@ -175,7 +175,7 @@ def test_Signature_fails_if_provided_with_non_parsable_default():
 
 def test_Signature_fails_if_provided_with_inconsistent_annotation():
     class DummyFlat(Signature):
-        def __init__(self, a: str = 1):
+        def __init__(self, a: str = 1):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):

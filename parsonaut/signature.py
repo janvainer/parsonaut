@@ -82,7 +82,7 @@ class Signature(Generic[T, P]):
             if issubclass(typ, Signature):
                 # fill in missing default
                 if value is Missing:
-                    value = Signature.from_class(typ)
+                    value = Signature.from_class(typ)  # type: ignore
                 # or ensure correct type
                 else:
                     assert isinstance(value, Signature)
@@ -161,10 +161,12 @@ class Signature(Generic[T, P]):
 
         return Signature(cls, signature)
 
-    def to_eager(self, recursive: bool = False, **kwargs: P.kwargs) -> T:
+    def to_eager(self, recursive: bool = False, *args: P.args, **kwargs: P.kwargs) -> T:
+        assert not args
         if recursive:
             return self.cls(
-                **{
+                *args,
+                **{  # type: ignore
                     **{
                         k: (
                             v.to_eager(recursive=recursive)
@@ -177,8 +179,9 @@ class Signature(Generic[T, P]):
                 }
             )
         else:
-            return self.cls(
-                **{
+            return self.cls(  # type: ignore
+                *args,
+                **{  # type: ignore
                     **self.to_dict(recursive=False),
                     **kwargs,
                 }
