@@ -1,13 +1,14 @@
 import pytest
+
 from parsonaut.signature import (
     Missing,
     MissingType,
-    get_signature,
     Signature,
-    typecheck_eager,
+    flatten,
+    get_signature,
     set_typecheck_eager,
     should_typecheck_eagerly,
-    flatten,
+    typecheck_eager,
 )
 
 
@@ -58,10 +59,10 @@ def test_get_class_init_signature_nested():
 
 def test_set_typecheck_eagerly():
     set_typecheck_eager(True)
-    assert should_typecheck_eagerly() == True
+    assert should_typecheck_eagerly() is True
 
     set_typecheck_eager(False)
-    assert should_typecheck_eagerly() == False
+    assert should_typecheck_eagerly() is False
 
     # Set to default so that other tests work fine
     set_typecheck_eager()
@@ -150,18 +151,7 @@ def test_Signature_to_dict():
 
 
 def test_flatten():
-    assert flatten(
-        {
-            "1": "2",
-            "3": {
-                "4": "5"
-            }
-
-        }
-    ) == {
-        "1": "2",
-        "3.4": "5"
-    }
+    assert flatten({"1": "2", "3": {"4": "5"}}) == {"1": "2", "3.4": "5"}
 
 
 def test_Signature_skips_nonparsable_without_defaults():
@@ -175,7 +165,7 @@ def test_Signature_skips_nonparsable_without_defaults():
 
 def test_Signature_fails_if_provided_with_non_parsable_default():
     class DummyFlat(Signature):
-        def __init__(self, a: list[str] = [1]):
+        def __init__(self, a: list[str] = [1]):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):
@@ -185,7 +175,7 @@ def test_Signature_fails_if_provided_with_non_parsable_default():
 
 def test_Signature_fails_if_provided_with_inconsistent_annotation():
     class DummyFlat(Signature):
-        def __init__(self, a: str = 1):
+        def __init__(self, a: str = 1):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):

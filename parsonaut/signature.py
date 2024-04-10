@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, ParamSpec, Type, TypeVar, Generic, Mapping
+from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar
 
 from .typecheck import is_parsable_type
 
@@ -35,12 +35,20 @@ class Signature(Generic[T, P]):
         | tuple[type[float], float]
     )
 
-    def __init__(self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]) -> None:
+    def __init__(
+        self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]
+    ) -> None:
         self.cls = cls
         self._signature = signature
 
     def __hash__(self) -> int:
-        return hash(tuple(flatten(self.to_dict(with_annotations=True, with_class_tag=True)).items()))
+        return hash(
+            tuple(
+                flatten(
+                    self.to_dict(with_annotations=True, with_class_tag=True)
+                ).items()
+            )
+        )
 
     def __eq__(self, __value: "object | Signature") -> bool:
         return hash(self) == hash(__value)
@@ -55,7 +63,7 @@ class Signature(Generic[T, P]):
     def from_class(
         cl: Type[B] | Callable[A, B], *args: A.args, **kwargs: A.kwargs
     ) -> "Signature[B, A]":
-        
+
         if should_typecheck_eagerly():
             sig = Signature.get_signature(cl, *args, **kwargs)
             return Signature(cl, sig)
@@ -74,7 +82,7 @@ class Signature(Generic[T, P]):
             if issubclass(typ, Signature):
                 # fill in missing default
                 if value is Missing:
-                    value = Signature.from_class(typ)
+                    value = Signature.from_class(typ)  # type: ignore
                 # or ensure correct type
                 else:
                     assert isinstance(value, Signature)
@@ -112,7 +120,7 @@ class Signature(Generic[T, P]):
         self,
         recursive: bool = True,
         with_annotations: bool = False,
-        with_class_tag: bool = False
+        with_class_tag: bool = False,
     ):
         dct = dict()
         if with_class_tag:
@@ -153,10 +161,12 @@ class Signature(Generic[T, P]):
 
         return Signature(cls, signature)
 
-    def to_eager(self, recursive: bool = False, **kwargs: P.kwargs) -> T:
+    def to_eager(self, recursive: bool = False, *args: P.args, **kwargs: P.kwargs) -> T:
+        assert not args
         if recursive:
             return self.cls(
-                **{
+                *args,
+                **{  # type: ignore
                     **{
                         k: (
                             v.to_eager(recursive=recursive)
@@ -166,14 +176,15 @@ class Signature(Generic[T, P]):
                         for k, (t, v) in self.signature.items()
                     },
                     **kwargs,
-                }
+                },
             )
         else:
-            return self.cls(
-                **{
+            return self.cls(  # type: ignore
+                *args,
+                **{  # type: ignore
                     **self.to_dict(recursive=False),
                     **kwargs,
-                }
+                },
             )
 
 
@@ -233,5 +244,5 @@ def flatten(dct):
                     k = f"{prefix}.{k}"
                 out.append((k, v))
         return out
-            
+
     return dict(_flatten(dct, ""))
