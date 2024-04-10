@@ -26,6 +26,9 @@ jobs:
     - name: Run tests
       run: |
         pytest --cov=parsonaut
+
+    # TODO: this is going to be failing untill we stay private
+    # Once public, see https://edbennett.github.io/python-testing-ci/07-coverage/index.html
     - name: Upload coverage report
       run: |
         codecov
