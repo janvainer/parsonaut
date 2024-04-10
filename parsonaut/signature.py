@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, ParamSpec, Type, TypeVar, Generic, Mapping
+from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar
 
 from .typecheck import is_parsable_type
 

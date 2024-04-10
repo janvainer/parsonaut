@@ -1,13 +1,14 @@
 import pytest
+
 from parsonaut.signature import (
     Missing,
     MissingType,
-    get_signature,
     Signature,
-    typecheck_eager,
+    flatten,
+    get_signature,
     set_typecheck_eager,
     should_typecheck_eagerly,
-    flatten,
+    typecheck_eager,
 )
 
 
