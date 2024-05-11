@@ -22,7 +22,7 @@ jobs:
         python-version: ${{ matrix.python-version }}
     - name: Install pyright
       run: |
-        python -m pip install --upgrade pip pyright==1.1.358
+        python -m pip install --upgrade pip pyright==1.1.358 pytest
     - name: Check static typing
       run: |
         pyright
