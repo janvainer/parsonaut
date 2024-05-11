@@ -1,5 +1,8 @@
 {
     "include": [
         "parsonaut",
-    ]
+        "tests",
+    ],
+    "venvPath": ".",
+    "venv": "env",
 }

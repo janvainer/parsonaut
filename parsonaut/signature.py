@@ -44,8 +44,8 @@ class Signature(Generic[T, P]):
     def __hash__(self) -> int:
         return hash(
             tuple(
-                flatten(
-                    self.to_dict(with_annotations=True, with_class_tag=True)
+                self.to_dict(
+                    with_annotations=True, with_class_tag=True, flatten=True
                 ).items()
             )
         )
@@ -60,9 +60,7 @@ class Signature(Generic[T, P]):
         return self._signature
 
     @staticmethod
-    def from_class(
-        cl: Type[B] | Callable[A, B], *args: A.args, **kwargs: A.kwargs
-    ) -> "Signature[B, A]":
+    def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Signature[B, A]":
 
         if should_typecheck_eagerly():
             sig = Signature.get_signature(cl, *args, **kwargs)
@@ -121,6 +119,7 @@ class Signature(Generic[T, P]):
         recursive: bool = True,
         with_annotations: bool = False,
         with_class_tag: bool = False,
+        flatten: bool = False,
     ):
         dct = dict()
         if with_class_tag:
@@ -144,10 +143,16 @@ class Signature(Generic[T, P]):
                 else:
                     dct[k] = value
 
+        if flatten:
+            dct = flatten_dict(dct)
+
         return dct
 
     @staticmethod
     def from_dict(dct):
+        if any("." in k for k in dct):
+            dct = unflatten_dict(dct)
+
         signature = dict()
 
         cls = dct[TYPE_NAME]
@@ -155,11 +160,11 @@ class Signature(Generic[T, P]):
             if k == TYPE_NAME:
                 continue
             elif isinstance(v, dict):
-                signature[k] = (Signature, Signature.from_dict(v))
+                signature[k] = Signature.from_dict(v)
             else:
                 signature[k] = v
 
-        return Signature(cls, signature)
+        return Signature.from_class(cls, **signature)
 
     def to_eager(self, recursive: bool = False, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args
@@ -232,7 +237,7 @@ def get_signature(func: Callable, *args, **kwargs) -> dict[str, tuple[Type, Any]
     return ret
 
 
-def flatten(dct):
+def flatten_dict(dct: dict) -> dict:
 
     def _flatten(dct, prefix: str):
         out = list()
@@ -246,3 +251,21 @@ def flatten(dct):
         return out
 
     return dict(_flatten(dct, ""))
+
+
+def unflatten_dict(flat: dict) -> dict:
+
+    base = {}
+    for key, value in flat.items():
+        root = base
+
+        if "." in key:
+            *parts, key = key.split(".")
+
+            for part in parts:
+                root.setdefault(part, {})
+                root = root[part]
+
+        root[key] = value
+
+    return base

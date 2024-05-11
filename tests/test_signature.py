@@ -4,11 +4,12 @@ from parsonaut.signature import (
     Missing,
     MissingType,
     Signature,
-    flatten,
+    flatten_dict,
     get_signature,
     set_typecheck_eager,
     should_typecheck_eagerly,
     typecheck_eager,
+    unflatten_dict,
 )
 
 
@@ -117,6 +118,7 @@ def test_Signature_from_class():
 
 
 def test_Signature_to_dict():
+    # TODO: spome combinatoins are not covered yet
     assert Signature.from_class(DummyNested).to_dict() == {
         "b": {"c": 3.14},
         "c": 3.14,
@@ -136,6 +138,16 @@ def test_Signature_to_dict():
         "c": (float, 3.14),
     }
 
+    assert Signature.from_class(DummyNested).to_dict(flatten=True) == {
+        "b.c": 3.14,
+        "c": 3.14,
+    }
+
+    assert Signature.from_class(DummyNested).to_dict(recursive=False) == {
+        "b": Signature.from_class(DummyFlat),
+        "c": 3.14,
+    }
+
     assert Signature.from_class(DummyNested).to_dict(
         with_annotations=True, with_class_tag=True
     ) == {
@@ -150,8 +162,33 @@ def test_Signature_to_dict():
     }
 
 
-def test_flatten():
-    assert flatten({"1": "2", "3": {"4": "5"}}) == {"1": "2", "3.4": "5"}
+def test_Signature_from_dict_nested():
+    assert Signature.from_dict(
+        {
+            "_class": DummyNested,
+            "b": {"_class": DummyFlat, "c": 3.14},
+            "c": 3.14,
+        }
+    ) == Signature.from_class(DummyNested)
+
+
+def test_Signature_from_dict_flat():
+    assert Signature.from_dict(
+        {
+            "_class": DummyNested,
+            "b._class": DummyFlat,
+            "b.c": 3.14,
+            "c": 3.14,
+        }
+    ) == Signature.from_class(DummyNested)
+
+
+def test_flatten_dict():
+    assert flatten_dict({"1": "2", "3": {"4": "5"}}) == {"1": "2", "3.4": "5"}
+
+
+def test_unflatten_dict():
+    assert unflatten_dict({"1": "2", "3.4": "5"}) == {"1": "2", "3": {"4": "5"}}
 
 
 def test_Signature_skips_nonparsable_without_defaults():
