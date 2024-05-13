@@ -22,8 +22,3 @@ repos:
     rev: 24.2.0
     hooks:
       - id: black
-
-  - repo: https://github.com/RobertCraigie/pyright-python
-    rev: v1.1.358
-    hooks:
-    - id: pyright
