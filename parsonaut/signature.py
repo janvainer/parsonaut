@@ -22,13 +22,13 @@ TYPECHECK_EAGER = False
 TYPE_NAME = "_class"
 
 
-class Signature(Generic[T, P]):
+class Lazy(Generic[T, P]):
     """
     A mixin class that allows for lazy initialization of a class instance.
     """
 
     KeyTypes = (
-        tuple[type["Signature"], "Signature"]
+        tuple[type["Lazy"], "Lazy"]
         | tuple[type[bool], bool]
         | tuple[type[int], int]
         | tuple[type[str], str]
@@ -50,7 +50,7 @@ class Signature(Generic[T, P]):
             )
         )
 
-    def __eq__(self, __value: "object | Signature") -> bool:
+    def __eq__(self, __value: "object | Lazy") -> bool:
         return hash(self) == hash(__value)
 
     @property
@@ -60,19 +60,17 @@ class Signature(Generic[T, P]):
         return self._signature
 
     @staticmethod
-    def is_signature_type(typ):
-        return getattr(typ, "__origin__", None) == Signature or issubclass(
-            typ, Signature
-        )
+    def is_lazy_type(typ):
+        return getattr(typ, "__origin__", None) == Lazy or issubclass(typ, Lazy)
 
     @staticmethod
-    def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Signature[B, A]":
+    def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Lazy[B, A]":
 
         if should_typecheck_eagerly():
-            sig = Signature.get_signature(cl, *args, **kwargs)
-            return Signature(cl, sig)
+            sig = Lazy.get_signature(cl, *args, **kwargs)
+            return Lazy(cl, sig)
         else:
-            return Signature(cl, partial(Signature.get_signature, cl, *args, **kwargs))
+            return Lazy(cl, partial(Lazy.get_signature, cl, *args, **kwargs))
 
     @staticmethod
     def get_signature(cl, *args, **kwargs) -> Mapping[str, KeyTypes]:
@@ -83,24 +81,24 @@ class Signature(Generic[T, P]):
         for name, (typ, value) in signature.items():
 
             # enforce default values
-            if Signature.is_signature_type(typ):
+            if Lazy.is_lazy_type(typ):
                 # fill in missing default
                 if value is Missing:
-                    value = Signature.from_class(typ)  # type: ignore
+                    value = Lazy.from_class(typ)  # type: ignore
                 # or ensure correct type
                 else:
                     assert isinstance(
-                        value, Signature
-                    ), f"Expected value to be parsable or a Signature. Got {type(value)}"
+                        value, Lazy
+                    ), f"Expected value to be parsable or a Lazy. Got {type(value)}"
                 res[name] = (typ, value)
                 continue
 
             # fill in parsable type if value is Parsable
-            if isinstance(value, Signature):
+            if isinstance(value, Lazy):
                 if typ == MissingType:
-                    typ = Signature
+                    typ = Lazy
                 else:
-                    assert Signature.is_signature_type(typ)
+                    assert Lazy.is_lazy_type(typ)
                 res[name] = (typ, value)
                 continue
 
@@ -138,9 +136,9 @@ class Signature(Generic[T, P]):
             if value is Missing and not with_annotations:
                 continue
 
-            if Signature.is_signature_type(typ):
+            if Lazy.is_lazy_type(typ):
                 if recursive:
-                    assert isinstance(value, Signature)
+                    assert isinstance(value, Lazy)
                     value = value.to_dict(
                         recursive=recursive,
                         with_annotations=with_annotations,
@@ -172,11 +170,11 @@ class Signature(Generic[T, P]):
             if k == TYPE_NAME:
                 continue
             elif isinstance(v, dict):
-                signature[k] = Signature.from_dict(v)
+                signature[k] = Lazy.from_dict(v)
             else:
                 signature[k] = v
 
-        return Signature.from_class(cls, **signature)
+        return Lazy.from_class(cls, **signature)
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args
@@ -209,10 +207,8 @@ class Parsable(metaclass=ParsableMeta):
     _cfg: dict
 
     @classmethod
-    def as_lazy(
-        cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs
-    ) -> "Signature[B, A]":
-        return Signature.from_class(cls, *args, **kwargs)
+    def as_lazy(cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs) -> "Lazy[B, A]":
+        return Lazy.from_class(cls, *args, **kwargs)
 
     def to_dict(
         self,
@@ -239,7 +235,7 @@ class Parsable(metaclass=ParsableMeta):
     def from_dict(cls, dct):
         # For now we assume the dict contains TYPE_NAME
         # In the future, we should be able to infer the TYPE_NAME also for sub-classes from defaults
-        return Signature.from_class(cls).from_dict(dct).to_eager()
+        return Lazy.from_class(cls).from_dict(dct).to_eager()
 
 
 def should_typecheck_eagerly():

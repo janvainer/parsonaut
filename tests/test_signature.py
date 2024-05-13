@@ -1,9 +1,9 @@
 import pytest
 
 from parsonaut.signature import (
+    Lazy,
     Missing,
     MissingType,
-    Signature,
     flatten_dict,
     get_signature,
     set_typecheck_eager,
@@ -13,12 +13,12 @@ from parsonaut.signature import (
 )
 
 
-class DummyFlat(Signature):
+class DummyFlat(Lazy):
     def __init__(self, a, b: str, c: float = 3.14):
         pass
 
 
-class DummyNested(Signature):
+class DummyNested(Lazy):
     def __init__(self, a: str, b: DummyFlat, c: float = 3.14):
         pass
 
@@ -80,56 +80,56 @@ def test_typecheck_eager_context():
     set_typecheck_eager()
 
 
-def test_Signature__eq__():
-    s1 = Signature(DummyNested, Signature.get_signature(DummyNested))
-    s2 = Signature(DummyNested, Signature.get_signature(DummyNested))
-    s3 = Signature(DummyNested, Signature.get_signature(DummyNested, a="hello"))
+def test_Lazy__eq__():
+    s1 = Lazy(DummyNested, Lazy.get_signature(DummyNested))
+    s2 = Lazy(DummyNested, Lazy.get_signature(DummyNested))
+    s3 = Lazy(DummyNested, Lazy.get_signature(DummyNested, a="hello"))
     assert s1 == s2
     assert s1 != s3
 
 
-def test_Signature_get_signature():
-    assert Signature.get_signature(DummyFlat) == {
+def test_Lazy_get_signature():
+    assert Lazy.get_signature(DummyFlat) == {
         "b": (str, Missing),
         "c": (float, 3.14),
     }
 
-    assert Signature.get_signature(DummyNested) == {
+    assert Lazy.get_signature(DummyNested) == {
         "a": (str, Missing),
-        "b": (DummyFlat, Signature.from_class(DummyFlat)),
+        "b": (DummyFlat, Lazy.from_class(DummyFlat)),
         "c": (float, 3.14),
     }
 
-    assert Signature.get_signature(DummyNested, a="hello") != {
+    assert Lazy.get_signature(DummyNested, a="hello") != {
         "a": (str, Missing),
-        "b": (DummyFlat, Signature.from_class(DummyFlat)),
+        "b": (DummyFlat, Lazy.from_class(DummyFlat)),
         "c": (float, 3.14),
     }
 
 
-def test_Signature_from_class():
-    s1 = Signature(DummyNested, Signature.get_signature(DummyNested))
-    s2 = Signature.from_class(DummyNested)
+def test_Lazy_from_class():
+    s1 = Lazy(DummyNested, Lazy.get_signature(DummyNested))
+    s2 = Lazy.from_class(DummyNested)
     assert s1 == s2
 
-    s1 = Signature(DummyNested, Signature.get_signature(DummyNested, a="hello"))
-    s2 = Signature.from_class(DummyNested, a="hello")
+    s1 = Lazy(DummyNested, Lazy.get_signature(DummyNested, a="hello"))
+    s2 = Lazy.from_class(DummyNested, a="hello")
     assert s1 == s2
 
 
-def test_Signature_to_dict():
+def test_Lazy_to_dict():
     # TODO: spome combinatoins are not covered yet
-    assert Signature.from_class(DummyNested).to_dict() == {
+    assert Lazy.from_class(DummyNested).to_dict() == {
         "b": {"c": 3.14},
         "c": 3.14,
     }
-    assert Signature.from_class(DummyNested).to_dict(with_class_tag=True) == {
+    assert Lazy.from_class(DummyNested).to_dict(with_class_tag=True) == {
         "_class": DummyNested,
         "b": {"_class": DummyFlat, "c": 3.14},
         "c": 3.14,
     }
 
-    assert Signature.from_class(DummyNested).to_dict(with_annotations=True) == {
+    assert Lazy.from_class(DummyNested).to_dict(with_annotations=True) == {
         "a": (str, Missing),
         "b": {
             "b": (str, Missing),
@@ -138,17 +138,17 @@ def test_Signature_to_dict():
         "c": (float, 3.14),
     }
 
-    assert Signature.from_class(DummyNested).to_dict(flatten=True) == {
+    assert Lazy.from_class(DummyNested).to_dict(flatten=True) == {
         "b.c": 3.14,
         "c": 3.14,
     }
 
-    assert Signature.from_class(DummyNested).to_dict(recursive=False) == {
-        "b": Signature.from_class(DummyFlat),
+    assert Lazy.from_class(DummyNested).to_dict(recursive=False) == {
+        "b": Lazy.from_class(DummyFlat),
         "c": 3.14,
     }
 
-    assert Signature.from_class(DummyNested).to_dict(
+    assert Lazy.from_class(DummyNested).to_dict(
         with_annotations=True, with_class_tag=True
     ) == {
         "_class": DummyNested,
@@ -162,25 +162,25 @@ def test_Signature_to_dict():
     }
 
 
-def test_Signature_from_dict_nested():
-    assert Signature.from_dict(
+def test_Lazy_from_dict_nested():
+    assert Lazy.from_dict(
         {
             "_class": DummyNested,
             "b": {"_class": DummyFlat, "c": 3.14},
             "c": 3.14,
         }
-    ) == Signature.from_class(DummyNested)
+    ) == Lazy.from_class(DummyNested)
 
 
-def test_Signature_from_dict_flat():
-    assert Signature.from_dict(
+def test_Lazy_from_dict_flat():
+    assert Lazy.from_dict(
         {
             "_class": DummyNested,
             "b._class": DummyFlat,
             "b.c": 3.14,
             "c": 3.14,
         }
-    ) == Signature.from_class(DummyNested)
+    ) == Lazy.from_class(DummyNested)
 
 
 def test_flatten_dict():
@@ -191,30 +191,30 @@ def test_unflatten_dict():
     assert unflatten_dict({"1": "2", "3.4": "5"}) == {"1": "2", "3": {"4": "5"}}
 
 
-def test_Signature_skips_nonparsable_without_defaults():
-    class DummyFlat(Signature):
+def test_Lazy_skips_nonparsable_without_defaults():
+    class DummyFlat(Lazy):
         def __init__(self, a: list[str]):
             pass
 
-    s = Signature.from_class(DummyFlat)
+    s = Lazy.from_class(DummyFlat)
     assert "a" not in s.signature
 
 
-def test_Signature_fails_if_provided_with_non_parsable_default():
-    class DummyFlat(Signature):
+def test_Lazy_fails_if_provided_with_non_parsable_default():
+    class DummyFlat(Lazy):
         def __init__(self, a: list[str] = [1]):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):
         with typecheck_eager():
-            Signature.from_class(DummyFlat)
+            Lazy.from_class(DummyFlat)
 
 
-def test_Signature_fails_if_provided_with_inconsistent_annotation():
-    class DummyFlat(Signature):
+def test_Lazy_fails_if_provided_with_inconsistent_annotation():
+    class DummyFlat(Lazy):
         def __init__(self, a: str = 1):  # type: ignore
             pass
 
     with pytest.raises(AssertionError):
         with typecheck_eager():
-            Signature.from_class(DummyFlat)
+            Lazy.from_class(DummyFlat)
