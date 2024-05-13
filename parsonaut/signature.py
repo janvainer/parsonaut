@@ -60,6 +60,12 @@ class Signature(Generic[T, P]):
         return self._signature
 
     @staticmethod
+    def is_signature_type(typ):
+        return getattr(typ, "__origin__", None) == Signature or issubclass(
+            typ, Signature
+        )
+
+    @staticmethod
     def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Signature[B, A]":
 
         if should_typecheck_eagerly():
@@ -77,13 +83,15 @@ class Signature(Generic[T, P]):
         for name, (typ, value) in signature.items():
 
             # enforce default values
-            if issubclass(typ, Signature):
+            if Signature.is_signature_type(typ):
                 # fill in missing default
                 if value is Missing:
                     value = Signature.from_class(typ)  # type: ignore
                 # or ensure correct type
                 else:
-                    assert isinstance(value, Signature)
+                    assert isinstance(
+                        value, Signature
+                    ), f"Expected value to be parsable or a Signature. Got {type(value)}"
                 res[name] = (typ, value)
                 continue
 
@@ -91,6 +99,8 @@ class Signature(Generic[T, P]):
             if isinstance(value, Signature):
                 if typ == MissingType:
                     typ = Signature
+                else:
+                    assert Signature.is_signature_type(typ)
                 res[name] = (typ, value)
                 continue
 
@@ -128,7 +138,7 @@ class Signature(Generic[T, P]):
             if value is Missing and not with_annotations:
                 continue
 
-            if issubclass(typ, Signature):
+            if Signature.is_signature_type(typ):
                 if recursive:
                     assert isinstance(value, Signature)
                     value = value.to_dict(
@@ -150,6 +160,8 @@ class Signature(Generic[T, P]):
 
     @staticmethod
     def from_dict(dct):
+        # For now we assume the dict contains TYPE_NAME
+        # In the future, we should be able to infer the TYPE_NAME also for sub-classes from defaults
         if any("." in k for k in dct):
             dct = unflatten_dict(dct)
 
@@ -166,31 +178,68 @@ class Signature(Generic[T, P]):
 
         return Signature.from_class(cls, **signature)
 
-    def to_eager(self, recursive: bool = False, *args: P.args, **kwargs: P.kwargs) -> T:
+    def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args
-        if recursive:
-            return self.cls(
-                *args,
-                **{  # type: ignore
-                    **{
-                        k: (
-                            v.to_eager(recursive=recursive)
-                            if isinstance(v, Signature)
-                            else v
-                        )
-                        for k, (t, v) in self.signature.items()
-                    },
-                    **kwargs,
-                },
-            )
-        else:
-            return self.cls(  # type: ignore
-                *args,
-                **{  # type: ignore
-                    **self.to_dict(recursive=False),
-                    **kwargs,
-                },
-            )
+        return self.cls(  # type: ignore
+            *args,
+            **{  # type: ignore
+                **self.to_dict(recursive=False),
+                **kwargs,
+            },
+        )
+
+
+class ParsableMeta(type):
+    def __call__(cls, *args, **kwargs):
+
+        cfg = cls.as_lazy(*args, **kwargs).to_dict(
+            with_class_tag=True,
+        )
+
+        # https://stackoverflow.com/a/73923070/8378586
+        obj = cls.__new__(cls, *args, **kwargs)
+        obj._cfg = cfg
+        # Initialize the final object
+        obj.__init__(*args, **kwargs)
+        return obj
+
+
+class Parsable(metaclass=ParsableMeta):
+
+    _cfg: dict
+
+    @classmethod
+    def as_lazy(
+        cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs
+    ) -> "Signature[B, A]":
+        return Signature.from_class(cls, *args, **kwargs)
+
+    def to_dict(
+        self,
+        with_class_tag: bool = False,
+        flatten: bool = False,
+    ):
+        def remove_class_tag(dct):
+            return {
+                k: (v if not isinstance(v, dict) else remove_class_tag(v))
+                for k, v in dct.items()
+                if k != TYPE_NAME
+            }
+
+        dct = self._cfg
+        if not with_class_tag:
+            dct = remove_class_tag(self._cfg)
+
+        if flatten:
+            dct = flatten_dict(dct)
+
+        return dct
+
+    @classmethod
+    def from_dict(cls, dct):
+        # For now we assume the dict contains TYPE_NAME
+        # In the future, we should be able to infer the TYPE_NAME also for sub-classes from defaults
+        return Signature.from_class(cls).from_dict(dct).to_eager()
 
 
 def should_typecheck_eagerly():
