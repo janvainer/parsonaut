@@ -1,6 +1,6 @@
 import pytest
 
-from parsonaut.signature import (
+from parsonaut.lazy import (
     Lazy,
     Missing,
     MissingType,
