@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar
+from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
 from .typecheck import is_parsable_type
 
@@ -83,8 +83,10 @@ class Lazy(Generic[T, P]):
             # enforce default values
             if Lazy.is_lazy_type(typ):
                 # fill in missing default
-                if value is Missing:
-                    value = Lazy.from_class(typ)  # type: ignore
+                if value is Missing and (subtyp := get_args(typ)):
+                    subtyp, *_ = subtyp
+                    assert issubclass(subtyp, Parsable)
+                    value = Lazy.from_class(subtyp)  # type: ignore
                 # or ensure correct type
                 else:
                     assert isinstance(
@@ -265,7 +267,10 @@ def get_signature(func: Callable, *args, **kwargs) -> dict[str, tuple[Type, Any]
     from inspect import _empty, signature
 
     sig = signature(func)
-    bound = sig.bind_partial(*args, **kwargs)
+    if "self" in sig.parameters:
+        bound = sig.bind_partial(None, *args, **kwargs)
+    else:
+        bound = sig.bind_partial(*args, **kwargs)
     bound.apply_defaults()
 
     ret = dict()
