@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from functools import partial
 
 import pytest
@@ -18,7 +19,9 @@ from parsonaut.lazy import (
 
 class DummyFlat(Parsable):
     def __init__(self, a, b: str, c: float = 3.14):
-        pass
+        self.a = a
+        self.b = b
+        self.c = c
 
 
 class DummyNested(Parsable):
@@ -287,3 +290,43 @@ def test_Lazy_fails_if_provided_with_inconsistent_annotation():
     with pytest.raises(AssertionError):
         with typecheck_eager():
             Lazy.from_class(DummyFlat)
+
+
+def test_Lazy_on_dataclasses():
+
+    @dataclass
+    class InnerDummy:
+        a: str = "hello"
+        b: int = 1
+
+    lazy_dummy = Lazy.from_class(InnerDummy)
+    assert lazy_dummy.signature == {"a": (str, "hello"), "b": (int, 1)}
+
+    @dataclass
+    class OuterDummy:
+        c: Lazy[InnerDummy, ...] = Lazy.from_class(InnerDummy)
+        d: tuple[int, ...] = (1, 2, 3)
+
+    lazy_dummy = Lazy.from_class(OuterDummy)
+    assert lazy_dummy.signature == {
+        "c": (Lazy[InnerDummy, ...], Lazy.from_class(InnerDummy)),
+        "d": (tuple[int, ...], (1, 2, 3)),
+    }
+
+
+def test_Lazy_to_eager():
+    lazy_dummy = Lazy.from_class(DummyFlat)
+
+    # Missing kwargs
+    with pytest.raises(TypeError):
+        lazy_dummy.to_eager()
+
+    # only kwargs are allowed, not args
+    with pytest.raises(AssertionError):
+        lazy_dummy.to_eager(1, "hello", 1.0)
+
+    dummy = lazy_dummy.to_eager(a=1, b="hello", c=1.0)
+    assert isinstance(dummy, DummyFlat)
+    assert dummy.a == 1
+    assert dummy.b == "hello"
+    assert dummy.c == 1.0
