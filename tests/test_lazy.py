@@ -177,7 +177,6 @@ def test_Lazy_from_class():
 
 
 def test_Lazy_to_dict():
-    # TODO: spome combinatoins are not covered yet
     assert Lazy.from_class(DummyNested).to_dict() == {
         "b": {"c": 3.14},
         "c": 3.14,
@@ -217,6 +216,17 @@ def test_Lazy_to_dict():
             "b": (str, Missing),
             "c": (float, 3.14),
         },
+        "c": (float, 3.14),
+    }
+
+    assert Lazy.from_class(DummyNested).to_dict(
+        with_annotations=True, with_class_tag=True, flatten=True
+    ) == {
+        "_class": DummyNested,
+        "a": (str, Missing),
+        "b._class": DummyFlat,
+        "b.b": (str, Missing),
+        "b.c": (float, 3.14),
         "c": (float, 3.14),
     }
 
