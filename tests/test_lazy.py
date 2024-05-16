@@ -26,7 +26,9 @@ class DummyFlat(Parsable):
 
 class DummyNested(Parsable):
     def __init__(self, a: str, b: Lazy[DummyFlat, ...], c: float = 3.14):
-        pass
+        self.a = a
+        self.b = b.to_eager(a=a)
+        self.c = c
 
 
 def test_get_class_init_signature_flat():
@@ -330,3 +332,136 @@ def test_Lazy_to_eager():
     assert dummy.a == 1
     assert dummy.b == "hello"
     assert dummy.c == 1.0
+
+
+def test_Parsable_as_lazy():
+    assert DummyFlat.as_lazy() == Lazy.from_class(DummyFlat)
+    assert DummyFlat.as_lazy(b="hello") == Lazy.from_class(DummyFlat, b="hello")
+
+    assert DummyNested.as_lazy() == Lazy.from_class(DummyNested)
+    assert DummyNested.as_lazy(
+        a="hello", b=DummyFlat.as_lazy(b="there")
+    ) == Lazy.from_class(
+        DummyNested, a="hello", b=Lazy.from_class(DummyFlat, b="there")
+    )
+
+
+@pytest.mark.parametrize(
+    ("obj",),
+    [
+        (DummyFlat(5, "hello"),),
+        (DummyFlat.as_lazy().to_eager(a=5, b="hello"),),
+        (DummyFlat.as_lazy(b="hello").to_eager(a=5),),
+    ],
+)
+def test_Parsable_init_options(obj):
+    assert hasattr(obj, "_cfg")
+
+    assert set(obj._cfg.keys()) == {"_class", "b", "c"}
+    assert obj.a == 5
+    assert obj.b == "hello" == obj._cfg["b"]
+    assert obj.c == 3.14 == obj._cfg["c"]
+    assert obj._cfg["_class"] == DummyFlat
+
+
+def test_Parsable_as_lazy_raises_for_non_parsable_args_in_eager_mode():
+
+    # for non-parsable without type
+    with typecheck_eager():
+        with pytest.raises(AssertionError):
+            DummyFlat.as_lazy(a=5)
+
+        # for non-parsable with type
+        class DummyNonParsable(Parsable):
+            def __init__(self, a: list[int]) -> None:
+                pass
+
+        with pytest.raises(AssertionError):
+            DummyNonParsable.as_lazy(a=[5])
+
+
+def test_Parsable_to_dict():
+    assert DummyFlat(a=5, b="hello").to_dict() == {"b": "hello", "c": 3.14}
+
+    assert DummyFlat(a=5, b="hello").to_dict(with_class_tag=True) == {
+        "_class": DummyFlat,
+        "b": "hello",
+        "c": 3.14,
+    }
+
+    assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict() == {
+        "a": "hello",
+        "b": {
+            "b": "hello",
+            "c": 3.14,
+        },
+        "c": 3.14,
+    }
+
+    assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict(
+        with_class_tag=True
+    ) == {
+        "_class": DummyNested,
+        "a": "hello",
+        "b": {
+            "_class": DummyFlat,
+            "b": "hello",
+            "c": 3.14,
+        },
+        "c": 3.14,
+    }
+
+    assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict(
+        with_class_tag=True, flatten=True
+    ) == {
+        "_class": DummyNested,
+        "a": "hello",
+        "b._class": DummyFlat,
+        "b.b": "hello",
+        "b.c": 3.14,
+        "c": 3.14,
+    }
+
+
+def test_Parsable_from_dict_flat():
+    x = DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello"))
+    y = DummyNested.from_dict(
+        {
+            "_class": DummyNested,
+            "a": "hello",
+            "b._class": DummyFlat,
+            "b.b": "hello",
+            "b.c": 3.14,
+            "c": 3.14,
+        }
+    )
+    assert x._cfg == y._cfg
+    assert x.a == y.a
+    assert x.c == y.c
+
+    assert x.b.a == y.b.a
+    assert x.b.b == y.b.b
+    assert x.b.c == y.b.c
+
+
+def test_Parsable_from_dict_nested():
+    x = DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello"))
+    y = DummyNested.from_dict(
+        {
+            "_class": DummyNested,
+            "a": "hello",
+            "b": {
+                "_class": DummyFlat,
+                "b": "hello",
+                "c": 3.14,
+            },
+            "c": 3.14,
+        }
+    )
+    assert x._cfg == y._cfg
+    assert x.a == y.a
+    assert x.c == y.c
+
+    assert x.b.a == y.b.a
+    assert x.b.b == y.b.b
+    assert x.b.c == y.b.c
