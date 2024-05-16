@@ -1,5 +1,5 @@
 from functools import partial
-from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar
+from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
 from .typecheck import is_parsable_type
 
@@ -64,16 +64,31 @@ class Lazy(Generic[T, P]):
         return getattr(typ, "__origin__", None) == Lazy or issubclass(typ, Lazy)
 
     @staticmethod
-    def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Lazy[B, A]":
+    def from_class(
+        cl: Type[B] | Callable[A, B], *args, skip_non_parsable: bool = False, **kwargs
+    ) -> "Lazy[B, A]":
 
         if should_typecheck_eagerly():
-            sig = Lazy.get_signature(cl, *args, **kwargs)
+            sig = Lazy.get_signature(
+                cl, *args, skip_non_parsable=skip_non_parsable, **kwargs
+            )
             return Lazy(cl, sig)
         else:
-            return Lazy(cl, partial(Lazy.get_signature, cl, *args, **kwargs))
+            return Lazy(
+                cl,
+                partial(
+                    Lazy.get_signature,
+                    cl,
+                    *args,
+                    skip_non_parsable=skip_non_parsable,
+                    **kwargs,
+                ),
+            )
 
     @staticmethod
-    def get_signature(cl, *args, **kwargs) -> Mapping[str, KeyTypes]:
+    def get_signature(
+        cl, *args, skip_non_parsable: bool = False, **kwargs
+    ) -> Mapping[str, KeyTypes]:
         func = cl.__init__
         signature = get_signature(func, *args, **kwargs)
 
@@ -83,8 +98,10 @@ class Lazy(Generic[T, P]):
             # enforce default values
             if Lazy.is_lazy_type(typ):
                 # fill in missing default
-                if value is Missing:
-                    value = Lazy.from_class(typ)  # type: ignore
+                if value is Missing and (subtyp := get_args(typ)):
+                    subtyp, *_ = subtyp
+                    assert issubclass(subtyp, Parsable)
+                    value = Lazy.from_class(subtyp)  # type: ignore
                 # or ensure correct type
                 else:
                     assert isinstance(
@@ -102,15 +119,18 @@ class Lazy(Generic[T, P]):
                 res[name] = (typ, value)
                 continue
 
-            # Skip variables without type annotation
+            # Skip variables without type annotation - the user can fill them in with to_eager() call
             if typ == MissingType:
+                if not skip_non_parsable:
+                    assert value is Missing
                 continue
 
             # skip non-parsable - the user can fill them in with to_eager() call
             if not is_parsable_type(typ):
-                assert (
-                    value is Missing
-                ), f"Cannot initialize Lazy[{cl.__name__}, ...] with variable {name=} and non-parsable type={typ}."
+                if not skip_non_parsable:
+                    assert (
+                        value is Missing
+                    ), f"Cannot initialize Lazy[{cl.__name__}, ...] with variable {name=} and non-parsable type={typ}."
                 continue
 
             # check if the provided value is parsable and matches the annotation
@@ -190,7 +210,7 @@ class Lazy(Generic[T, P]):
 class ParsableMeta(type):
     def __call__(cls, *args, **kwargs):
 
-        cfg = cls.as_lazy(*args, **kwargs).to_dict(
+        cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs).to_dict(
             with_class_tag=True,
         )
 
@@ -265,7 +285,10 @@ def get_signature(func: Callable, *args, **kwargs) -> dict[str, tuple[Type, Any]
     from inspect import _empty, signature
 
     sig = signature(func)
-    bound = sig.bind_partial(*args, **kwargs)
+    if "self" in sig.parameters:
+        bound = sig.bind_partial(None, *args, **kwargs)
+    else:
+        bound = sig.bind_partial(*args, **kwargs)
     bound.apply_defaults()
 
     ret = dict()
