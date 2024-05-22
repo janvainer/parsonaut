@@ -1,8 +1,8 @@
 from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
-from .typecheck import is_parsable_type, Missing, MissingType
-
+from .parse import ArgumentParser
+from .typecheck import Missing, MissingType, is_parsable_type
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -199,6 +199,24 @@ class Lazy(Generic[T, P]):
             },
         )
 
+    def parse_args(self: "Lazy[B, A]", args: list[str] | None = None) -> "Lazy[B, A]":
+        dct = self.to_dict(with_annotations=True, with_class_tag=True, flatten=True)
+
+        parsed_dict = {}
+        parser = ArgumentParser()
+
+        for name, x in dct.items():
+            if "_class" in name:
+                parsed_dict[name] = x
+                continue
+
+            typ, value = x
+            parser.add_option(name, value, typ)
+
+        args = parser.parse_args(args)
+        parsed_dict.update(vars(args))
+        return Lazy.from_dict(parsed_dict)
+
 
 class ParsableMeta(type):
     def __call__(cls, *args, **kwargs):
@@ -222,6 +240,12 @@ class Parsable(metaclass=ParsableMeta):
     @classmethod
     def as_lazy(cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs) -> "Lazy[B, A]":
         return Lazy.from_class(cls, *args, **kwargs)
+
+    @classmethod
+    def parse_args(
+        cls: "Callable[A, B] | Parsable", args: list[str] | None = None
+    ) -> B:
+        return cls.as_lazy().parse_args(args).to_eager()
 
     def to_dict(
         self,
