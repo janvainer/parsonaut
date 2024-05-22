@@ -1,14 +1,7 @@
 from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
-from .typecheck import is_parsable_type
-
-
-class MissingType:
-    pass
-
-
-Missing = MissingType()
+from .typecheck import is_parsable_type, Missing, MissingType
 
 
 T = TypeVar("T")
