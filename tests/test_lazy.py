@@ -183,12 +183,14 @@ def test_Lazy_from_class():
 
 def test_Lazy_to_dict():
     assert Lazy.from_class(DummyNested).to_dict() == {
-        "b": {"c": 3.14},
+        "a": Missing,
+        "b": {"c": 3.14, "b": Missing},
         "c": 3.14,
     }
     assert Lazy.from_class(DummyNested).to_dict(with_class_tag=True) == {
         "_class": DummyNested,
-        "b": {"_class": DummyFlat, "c": 3.14},
+        "a": Missing,
+        "b": {"_class": DummyFlat, "c": 3.14, "b": Missing},
         "c": 3.14,
     }
 
@@ -202,11 +204,14 @@ def test_Lazy_to_dict():
     }
 
     assert Lazy.from_class(DummyNested).to_dict(flatten=True) == {
+        "a": Missing,
+        "b.b": Missing,
         "b.c": 3.14,
         "c": 3.14,
     }
 
     assert Lazy.from_class(DummyNested).to_dict(recursive=False) == {
+        "a": Missing,
         "b": Lazy.from_class(DummyFlat),
         "c": 3.14,
     }
@@ -465,3 +470,72 @@ def test_Parsable_from_dict_nested():
     assert x.b.a == y.b.a
     assert x.b.b == y.b.b
     assert x.b.c == y.b.c
+
+
+def test_Lazy_blank_copies_are_identical():
+    a = DummyNested.as_lazy()
+    b = a.copy()
+    assert a == b
+
+
+def test_Lazy_copies_do_not_share_flat_data():
+    a = DummyNested.as_lazy()
+    b = a.copy()
+
+    # changing the original does not impact the copy
+    a._signature["a"] = (str, "hello")
+    assert b == DummyNested.as_lazy()
+    assert a != b
+
+    # changing the copy does not change original
+    a = DummyNested.as_lazy()
+    b._signature["a"] = (str, "hello")
+    assert a == DummyNested.as_lazy()
+    assert a != b
+
+
+def test_Lazy_copies_do_not_share_nested_data():
+    a = DummyNested.as_lazy()
+    b = a.copy()
+
+    # changing the original does not impact the copy
+    a._signature["b"][1]._signature["b"] = (str, "hello")
+    assert b == DummyNested.as_lazy()
+    assert a != b
+
+    # changing the copy does not change original
+    a = DummyNested.as_lazy()
+    b._signature["b"][1]._signature["b"] = (str, "hello")
+    assert a == DummyNested.as_lazy()
+    assert a != b
+
+
+def test_Lazy_copy_changes_field():
+    a = DummyNested.as_lazy()
+    b = a.copy({"a": "hello", "b.b": "there"})
+    assert b.to_dict() == {
+        "a": "hello",
+        "b": {
+            "b": "there",
+            "c": 3.14,
+        },
+        "c": 3.14,
+    }
+    assert a.to_dict() == {
+        "a": Missing,
+        "b": {
+            "b": Missing,
+            "c": 3.14,
+        },
+        "c": 3.14,
+    }
+
+
+def test_Lazy_copy_raises_for_unknown_field():
+    with pytest.raises(AssertionError):
+        DummyNested.as_lazy().copy({"x": 1})
+
+
+def test_Lazy_copy_raises_for_wrong_type():
+    with pytest.raises(AssertionError):
+        DummyNested.as_lazy().copy({"b": 1})

@@ -1,15 +1,8 @@
 from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
-from .typecheck import is_parsable_type
-
-
-class MissingType:
-    pass
-
-
-Missing = MissingType()
-
+from .parse import ArgumentParser
+from .typecheck import Missing, MissingType, is_parsable_type
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -27,6 +20,7 @@ class Lazy(Generic[T, P]):
     A mixin class that allows for lazy initialization of a class instance.
     """
 
+    # TODO: we are missing tuple here
     KeyTypes = (
         tuple[type["Lazy"], "Lazy"]
         | tuple[type[bool], bool]
@@ -134,13 +128,28 @@ class Lazy(Generic[T, P]):
                 continue
 
             # check if the provided value is parsable and matches the annotation
-            assert value is Missing or is_parsable_type(typ, value), (
+            assert value == Missing or is_parsable_type(typ, value), (
                 f"Provided value {name}={value} does not match "
                 f"the provided annotation {name}: {typ}"
             )
             res[name] = (typ, value)
 
         return res
+
+    def copy(self: "Lazy[B, A]", fields: dict | None = None) -> "Lazy[B, A]":
+        dct = self.to_dict(with_class_tag=True, flatten=True)
+        if fields is None:
+            return Lazy.from_dict(dct)
+
+        for field, new_val in fields.items():
+            assert (
+                "._class" not in field and "_class" not in field
+            ), "Cannot change class."
+            assert field in dct, f"Attempted to copy with {field=} that is not present."
+
+            dct[field] = new_val
+
+        return Lazy.from_dict(dct)
 
     def to_dict(
         self,
@@ -153,8 +162,6 @@ class Lazy(Generic[T, P]):
         if with_class_tag:
             dct[TYPE_NAME] = self.cls
         for k, (typ, value) in sorted(self.signature.items()):
-            if value is Missing and not with_annotations:
-                continue
 
             if Lazy.is_lazy_type(typ):
                 if recursive:
@@ -206,6 +213,30 @@ class Lazy(Generic[T, P]):
             },
         )
 
+    def parse_args(
+        self: "Lazy[B, A]", args: list[str] | None = None, skip: list[str] | None = None
+    ) -> "Lazy[B, A]":
+        dct = self.to_dict(with_annotations=True, with_class_tag=True, flatten=True)
+
+        if skip is not None:
+            skip = set(skip)
+            assert skip <= set(dct)
+            dct = {k: v for k, v in dct.items() if k not in skip}
+
+        parsed_dict = {}
+        parser = ArgumentParser()
+
+        for name, x in dct.items():
+            if "_class" in name:
+                continue
+
+            typ, value = x
+            parser.add_option(name, value, typ)
+
+        args = parser.parse_args(args)
+        parsed_dict.update(vars(args))
+        return self.copy(parsed_dict)
+
 
 class ParsableMeta(type):
     def __call__(cls, *args, **kwargs):
@@ -229,6 +260,12 @@ class Parsable(metaclass=ParsableMeta):
     @classmethod
     def as_lazy(cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs) -> "Lazy[B, A]":
         return Lazy.from_class(cls, *args, **kwargs)
+
+    @classmethod
+    def parse_args(
+        cls: "Callable[A, B] | Parsable", args: list[str] | None = None
+    ) -> B:
+        return cls.as_lazy().parse_args(args).to_eager()
 
     def to_dict(
         self,

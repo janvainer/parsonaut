@@ -9,7 +9,6 @@ from parsonaut.typecheck import (
     is_flat_tuple_type,
     is_float_type,
     is_int_type,
-    is_nested_tuple_type,
     is_parsable_type,
     is_str_type,
 )
@@ -94,66 +93,6 @@ def test_is_flat_tuple_type_rejects_mismatched_values():
     assert not is_flat_tuple_type(tuple[int, ...], (1, 1.0))
 
 
-@pytest.mark.parametrize(
-    "inner_typ",
-    BASIC_TYPES,
-)
-def test_is_nested_tuple_type_accepts_base_types(
-    inner_typ,
-):
-    assert is_nested_tuple_type(tuple[tuple[inner_typ]])
-    assert is_nested_tuple_type(tuple[tuple[inner_typ, inner_typ]])
-    assert is_nested_tuple_type(tuple[tuple[inner_typ, ...]])
-    assert is_nested_tuple_type(tuple[tuple[inner_typ, ...], ...])
-
-    val = inner_typ()
-    assert is_nested_tuple_type(tuple[tuple[inner_typ]], ((val,),))
-    assert is_nested_tuple_type(tuple[tuple[inner_typ, inner_typ]], ((val, val),))
-    assert is_nested_tuple_type(tuple[tuple[inner_typ, ...]], ((val, val, val),))
-    assert is_nested_tuple_type(
-        tuple[tuple[inner_typ, ...], ...], ((val, val), (val, val))
-    )
-
-
-@pytest.mark.parametrize(
-    ("typ1", "typ2"),
-    combinations(BASIC_TYPES, 2),
-)
-def test_is_nested_tuple_type_rejects_mixed_types(typ1, typ2):
-    assert not is_nested_tuple_type(tuple[tuple[typ1, typ2]])
-
-
-def test_is_nested_tuple_type_rejects_empty_tuple():
-    assert not is_nested_tuple_type(tuple)
-    assert not is_nested_tuple_type(tuple[tuple])
-
-
-def test_is_nested_tuple_type_rejects_non_tuple():
-    assert not is_nested_tuple_type(int)
-    assert not is_nested_tuple_type(tuple[list[int]])
-    assert not is_nested_tuple_type(list[tuple[int]])
-
-
-def test_is_nested_tuple_type_rejects_too_deeply_nested_tuple():
-    assert not is_nested_tuple_type(tuple[tuple[tuple[int]]])
-
-
-def test_is_nested_tuple_type_rejects_non_consistent_subtypes():
-    assert not is_nested_tuple_type(tuple[tuple[int], int])
-    assert not is_nested_tuple_type(tuple[tuple[int], tuple[int]])
-
-
-def test_is_nested_tuple_type_rejects_mismatched_values():
-    assert not is_nested_tuple_type(tuple[tuple[int]], ((1.0,),))
-    assert not is_nested_tuple_type(tuple[tuple[int]], tuple())
-    assert not is_nested_tuple_type(tuple[tuple[int]], tuple(tuple()))
-    assert not is_nested_tuple_type(tuple[tuple[int]], ((1, 1),))
-    assert not is_nested_tuple_type(tuple[tuple[int]], ((1,), (1,)))
-    assert not is_nested_tuple_type(tuple[tuple[int, int]], (1, 1.0))
-    assert not is_nested_tuple_type(tuple[tuple[int, ...]], ((1, 1.0),))
-    assert not is_nested_tuple_type(tuple[tuple[int, ...], ...], ((1, 1), (1,)))
-
-
 def test_get_flat_tuple_inner_type_accepted_cases():
     assert get_flat_tuple_inner_type(tuple[int]) == (int, 1)
     assert get_flat_tuple_inner_type(tuple[int, int]) == (int, 2)
@@ -191,6 +130,3 @@ def test_is_parsable_type_accepts(typ):
     assert is_parsable_type(tuple[typ])
     assert is_parsable_type(tuple[typ, typ])
     assert is_parsable_type(tuple[typ, ...])
-    assert is_parsable_type(tuple[tuple[typ, typ]])
-    assert is_parsable_type(tuple[tuple[typ, ...]])
-    assert is_parsable_type(tuple[tuple[typ, ...], ...])

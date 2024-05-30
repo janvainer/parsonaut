@@ -5,6 +5,13 @@ from typing import Any, Type, get_args, get_origin
 BASIC_TYPES = (int, float, bool, str)
 
 
+class MissingType:
+    pass
+
+
+Missing = MissingType()
+
+
 def _is_basic_type(typ: Type, basic_typ, value: Any | None = None) -> bool:
     assert basic_typ in BASIC_TYPES
     typ_ok = typ == basic_typ
@@ -77,62 +84,6 @@ def _is_flat_tuple_type(typ: Type, args):
     )
 
 
-def is_nested_tuple_type(typ: Type, value: Any | None = None) -> bool:
-    """Check if `typ` is a nested tuple type and optionally validate a value against it.
-
-    The first-level type must be a tuple, and the second-level type
-    must be a flat tuple type or an Ellipsis.
-    The inner-most type must be one of the basic types - int, float, bool or str.
-    If more inner type values are provided, they must all be of the same type.
-
-    Only 2-level nesting is allowed.
-
-    Examples of passing inputs:
-
-            - tuple[tuple[int, int]], ((1, 2), )
-            - tuple[tuple[int, int], ...], ((1, 2), (3, 4))
-
-    Examples of failing inputs:
-
-            - tuple[tuple[int], tuple[float]]
-            - tuple[tuple[int], tuple[int, int]]
-            - tuple[tuple[int], tuple[int]], ((1, ), (3, 4))
-
-    Args:
-        typ (Type): The type to check.
-        value (Any | None, optional): The value to validate against the type. Defaults to None.
-
-    Returns:
-        bool: True if the type is a nested tuple type and the value (if provided) matches the type, False otherwise.
-    """
-    args = get_args(typ)
-
-    if value is None:
-        return _is_nested_tuple_type(typ, args)
-    else:
-        return (
-            _is_nested_tuple_type(typ, args)
-            # the number of inner items matches the number of inner annotations
-            and (len(args) == len(value) or Ellipsis in args)
-            # all inner tuples have the same length
-            and all(len(item) == len(value[0]) for item in value)
-            # values in the tuple are of the same type
-            and all(is_flat_tuple_type(args[0], item) for item in value)
-        )
-
-
-@lru_cache(maxsize=1)
-def _is_nested_tuple_type(typ: Type, args):
-    return (
-        # Container is a tuple and contains inner annotation
-        get_origin(typ) == tuple
-        # if there is more annotations, the second one is an Ellipsis
-        and (len(args) == 1 or args[1] == Ellipsis)
-        # inner annotation is a flat tuple type
-        and is_flat_tuple_type(args[0])
-    )
-
-
 def is_parsable_type(typ: Type, value: Any | None = None) -> bool:
     """Check if the given type is parsable.
 
@@ -150,7 +101,6 @@ def is_parsable_type(typ: Type, value: Any | None = None) -> bool:
             is_bool_type(typ, value),
             is_str_type(typ, value),
             is_flat_tuple_type(typ, value),
-            is_nested_tuple_type(typ, value),
         )
     )
 
