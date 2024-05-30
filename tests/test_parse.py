@@ -1,6 +1,6 @@
 import pytest
 
-from parsonaut.lazy import Missing
+from parsonaut.lazy import Lazy, Missing, Parsable
 from parsonaut.parse import BOOL_FALSE_FLAGS, BOOL_TRUE_FLAGS, ArgumentParser, str2bool
 
 
@@ -93,3 +93,44 @@ def test_ArgumentParser_add_flat_tuple_with_bools(typ, value):
     parser.add_option("hello", Missing, typ)
     args = parser.parse_args(["--hello"] + list(value))
     assert args.hello == value_bool
+
+
+class Inner(Parsable):
+    def __init__(
+        self,
+        a,
+        b: str,
+        c: int = 1,
+    ) -> None:
+        pass
+
+
+class Outer(Parsable):
+    def __init__(
+        self,
+        d: Lazy[Inner, ...] = Inner.as_lazy(),
+        e: str = "hello",
+    ) -> None:
+        pass
+
+
+def test_parse_args_raises_if_skipping_unknown_field():
+    with pytest.raises(AssertionError):
+        Inner.as_lazy().parse_args([], skip=["x"])
+
+
+def test_parse_args_skips(capsys):
+    with pytest.raises(SystemExit):
+        Inner.as_lazy().parse_args(["--b", "hello"], skip=["b"])
+    assert "error: unrecognized arguments: --b hello" in capsys.readouterr().err
+
+
+def test_parse_args_empty_call_is_as_if_we_made_object_lazy():
+    assert Inner.as_lazy().parse_args([]) == Inner.as_lazy()
+
+
+def test_parse_args_changes_params():
+    assert Inner.as_lazy().parse_args(["--b", "hello"]) == Inner.as_lazy(b="hello")
+    assert Outer.as_lazy().parse_args(["--d.b", "hello"]) == Outer.as_lazy().copy(
+        {"d.b": "hello"}
+    )

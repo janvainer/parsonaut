@@ -22,6 +22,7 @@ class ArgumentParser(_ArgumentParser):
 
         name = f"--{name}"
         check_val = value if value is not Missing else None
+        required = False
         if is_bool_type(typ):
             self.add_argument(
                 name,
@@ -29,7 +30,7 @@ class ArgumentParser(_ArgumentParser):
                 default=value if value is not Missing else None,
                 metavar=f"{typ.__name__}",
                 help="Parameter descripion.",
-                required=value is Missing,
+                required=required,
             )
         elif (
             is_int_type(typ, check_val)
@@ -39,10 +40,10 @@ class ArgumentParser(_ArgumentParser):
             self.add_argument(
                 name,
                 type=typ,
-                default=value if value is not Missing else None,
+                default=value,
                 metavar=f"{typ.__name__}",
                 help="Parameter descripion.",
-                required=value is Missing,
+                required=required,
             )
         elif is_flat_tuple_type(typ, check_val):
             subtyp, nitems = get_flat_tuple_inner_type(typ)
@@ -59,7 +60,7 @@ class ArgumentParser(_ArgumentParser):
                 type=subtyp if subtyp != bool else str2bool,
                 default=tuple(value) if value is not Missing else None,
                 help="Parameter descripion loong this is a very loong description.",
-                required=value is Missing,
+                required=required,
                 action=collect_as(tuple),
             )
         else:
