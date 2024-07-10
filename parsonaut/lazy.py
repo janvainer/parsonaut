@@ -217,12 +217,14 @@ class Lazy(Generic[T, P]):
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args
-        return self.cls(  # type: ignore
+
+        kwargs2 = self.to_dict(recursive=False)
+        kwargs = {**kwargs2, **kwargs}
+        kwargs = {k: v for k, v in kwargs.items() if not isinstance(v, MissingType)}
+
+        return self.cls(
             *args,
-            **{  # type: ignore
-                **self.to_dict(recursive=False),
-                **kwargs,
-            },
+            **kwargs,
         )
 
     def parse_args(
@@ -277,7 +279,7 @@ class Parsable(metaclass=ParsableMeta):
     def parse_args(
         cls: "Callable[A, B] | Parsable", args: list[str] | None = None
     ) -> B:
-        return cls.as_lazy().parse_args(args).to_eager()
+        return cls.as_lazy().parse_args(args)
 
     def to_dict(
         self,
@@ -398,11 +400,7 @@ def lazy_str(dct: dict, level: int = 1):
 
     header = f'{dct["_class"].__name__}'
     attrs = [
-        (
-            f"{k}={lazy_str(v, level=2)}"   
-            if isinstance(v, dict)
-            else format_attr(k, v)
-        )
+        (f"{k}={lazy_str(v, level=2)}" if isinstance(v, dict) else format_attr(k, v))
         for k, v in dct.items()
         if k != "_class"
     ]
