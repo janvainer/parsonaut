@@ -46,6 +46,10 @@ class Lazy(Generic[T, P]):
 
     def __eq__(self, __value: "object | Lazy") -> bool:
         return hash(self) == hash(__value)
+    
+    def __str__(self):
+        return lazy_str(self.to_dict(with_class_tag=True))
+
 
     @property
     def signature(self) -> Mapping[str, KeyTypes]:
@@ -374,3 +378,27 @@ def unflatten_dict(flat: dict) -> dict:
         root[key] = value
 
     return base
+
+
+def lazy_str(dct: dict, level: int = 1):
+
+    def format_attr(k, v):
+        if isinstance(v, str):
+            return f"{k}='{v}'"
+        else:
+            return f"{k}={v}"
+
+    header = f'{dct["_class"].__name__}'
+    attrs = [
+        (
+            f"{k}={lazy_str(v, level=2)}"   
+            if isinstance(v, dict)
+            else format_attr(k, v)
+        )
+        for k, v in dct.items()
+        if k != "_class"
+    ]
+    indent = "    "
+    attrs = f",\n{indent * level}".join(attrs)
+    out = f"{header}(\n{indent * level}{attrs},\n{indent * (level - 1)})"
+    return out

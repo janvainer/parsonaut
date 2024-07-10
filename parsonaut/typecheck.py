@@ -6,7 +6,8 @@ BASIC_TYPES = (int, float, bool, str)
 
 
 class MissingType:
-    pass
+    def __repr__(self):
+        return "???"
 
 
 Missing = MissingType()

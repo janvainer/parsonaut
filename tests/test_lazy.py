@@ -539,3 +539,8 @@ def test_Lazy_copy_raises_for_unknown_field():
 def test_Lazy_copy_raises_for_wrong_type():
     with pytest.raises(AssertionError):
         DummyNested.as_lazy().copy({"b": 1})
+
+
+def test_Lazy__str__():
+    x = DummyNested.as_lazy().__str__()
+    assert x == "DummyNested(\n    a=???,\n    b=DummyFlat(\n        b=???,\n        c=3.14,\n    ),\n    c=3.14,\n)"
