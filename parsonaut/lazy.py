@@ -67,7 +67,13 @@ class Lazy(Generic[T, P]):
 
     @staticmethod
     def is_lazy_type(typ):
-        return getattr(typ, "__origin__", None) == Lazy or issubclass(typ, Lazy)
+        origin = getattr(typ, "__origin__", None)
+        if origin is None and issubclass(typ, Lazy):
+            return True
+        elif origin == Lazy:
+            return True
+        else:
+            return False
 
     @staticmethod
     def from_class(
@@ -279,7 +285,7 @@ class Parsable(metaclass=ParsableMeta):
     def parse_args(
         cls: "Callable[A, B] | Parsable", args: list[str] | None = None
     ) -> B:
-        return cls.as_lazy().parse_args(args)
+        return cls.as_lazy().parse_args(args).to_eager()
 
     def to_dict(
         self,
@@ -361,11 +367,11 @@ def flatten_dict(dct: dict) -> dict:
     def _flatten(dct, prefix: str):
         out = list()
         for k, v in dct.items():
+            if prefix:
+                k = f"{prefix}.{k}"
             if isinstance(v, dict):
                 out.extend(_flatten(v, prefix=k))
             else:
-                if prefix:
-                    k = f"{prefix}.{k}"
                 out.append((k, v))
         return out
 
@@ -400,7 +406,11 @@ def lazy_str(dct: dict, level: int = 1):
 
     header = f'{dct["_class"].__name__}'
     attrs = [
-        (f"{k}={lazy_str(v, level=2)}" if isinstance(v, dict) else format_attr(k, v))
+        (
+            f"{k}={lazy_str(v, level=level + 1)}"
+            if isinstance(v, dict)
+            else format_attr(k, v)
+        )
         for k, v in dct.items()
         if k != "_class"
     ]
