@@ -32,8 +32,10 @@ class Lazy(Generic[T, P]):
     def __init__(
         self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]
     ) -> None:
-        self.cls = cls
-        self._signature = signature
+        # going around the freezing thingy in __setattr__
+        # https://stackoverflow.com/a/4828492
+        object.__setattr__(self, "cls", cls)
+        object.__setattr__(self, "_signature", signature)
 
     def __hash__(self) -> int:
         return hash(
@@ -47,10 +49,20 @@ class Lazy(Generic[T, P]):
     def __eq__(self, __value: "object | Lazy") -> bool:
         return hash(self) == hash(__value)
 
+    def __str__(self):
+        return lazy_str(self.to_dict(with_class_tag=True))
+
+    def __getattr__(self, x):
+        assert x in self.signature
+        return self.signature[x][1]
+
+    def __setattr__(self, *ags):
+        raise AssertionError("Cannot set attributes of Lazy class")
+
     @property
     def signature(self) -> Mapping[str, KeyTypes]:
         if isinstance(self._signature, partial):
-            self._signature = self._signature()
+            object.__setattr__(self, "_signature", self._signature())
         return self._signature
 
     @staticmethod
@@ -205,12 +217,14 @@ class Lazy(Generic[T, P]):
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args
-        return self.cls(  # type: ignore
+
+        kwargs2 = self.to_dict(recursive=False)
+        kwargs = {**kwargs2, **kwargs}
+        kwargs = {k: v for k, v in kwargs.items() if not isinstance(v, MissingType)}
+
+        return self.cls(
             *args,
-            **{  # type: ignore
-                **self.to_dict(recursive=False),
-                **kwargs,
-            },
+            **kwargs,
         )
 
     def parse_args(
@@ -265,7 +279,7 @@ class Parsable(metaclass=ParsableMeta):
     def parse_args(
         cls: "Callable[A, B] | Parsable", args: list[str] | None = None
     ) -> B:
-        return cls.as_lazy().parse_args(args).to_eager()
+        return cls.as_lazy().parse_args(args)
 
     def to_dict(
         self,
@@ -374,3 +388,23 @@ def unflatten_dict(flat: dict) -> dict:
         root[key] = value
 
     return base
+
+
+def lazy_str(dct: dict, level: int = 1):
+
+    def format_attr(k, v):
+        if isinstance(v, str):
+            return f"{k}='{v}'"
+        else:
+            return f"{k}={v}"
+
+    header = f'{dct["_class"].__name__}'
+    attrs = [
+        (f"{k}={lazy_str(v, level=2)}" if isinstance(v, dict) else format_attr(k, v))
+        for k, v in dct.items()
+        if k != "_class"
+    ]
+    indent = "    "
+    attrs = f",\n{indent * level}".join(attrs)
+    out = f"{header}(\n{indent * level}{attrs},\n{indent * (level - 1)})"
+    return out

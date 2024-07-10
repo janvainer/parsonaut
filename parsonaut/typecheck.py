@@ -6,7 +6,8 @@ BASIC_TYPES = (int, float, bool, str)
 
 
 class MissingType:
-    pass
+    def __repr__(self):
+        return "???"
 
 
 Missing = MissingType()
@@ -66,7 +67,8 @@ def is_flat_tuple_type(typ: Type, value: Any | None = None) -> bool:
         return _is_flat_tuple_type(typ, args)
     else:
         return (
-            _is_flat_tuple_type(typ, args)
+            isinstance(value, tuple)
+            and _is_flat_tuple_type(typ, args)
             and (len(args) == len(value) or Ellipsis in args)
             and all(isinstance(item, args[0]) for item in value)
         )
