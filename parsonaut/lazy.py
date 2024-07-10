@@ -32,8 +32,10 @@ class Lazy(Generic[T, P]):
     def __init__(
         self, cls: Type[T] | Callable[P, T], signature: partial | Mapping[str, KeyTypes]
     ) -> None:
-        self.cls = cls
-        self._signature = signature
+        # going around the freezing thingy in __setattr__
+        # https://stackoverflow.com/a/4828492
+        object.__setattr__(self, "cls", cls)
+        object.__setattr__(self, "_signature", signature)
 
     def __hash__(self) -> int:
         return hash(
@@ -46,15 +48,21 @@ class Lazy(Generic[T, P]):
 
     def __eq__(self, __value: "object | Lazy") -> bool:
         return hash(self) == hash(__value)
-    
+
     def __str__(self):
         return lazy_str(self.to_dict(with_class_tag=True))
 
+    def __getattr__(self, x):
+        assert x in self.signature
+        return self.signature[x][1]
+
+    def __setattr__(self, *ags):
+        raise AssertionError("Cannot set attributes of Lazy class")
 
     @property
     def signature(self) -> Mapping[str, KeyTypes]:
         if isinstance(self._signature, partial):
-            self._signature = self._signature()
+            object.__setattr__(self, "_signature", self._signature())
         return self._signature
 
     @staticmethod

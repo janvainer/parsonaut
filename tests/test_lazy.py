@@ -543,4 +543,19 @@ def test_Lazy_copy_raises_for_wrong_type():
 
 def test_Lazy__str__():
     x = DummyNested.as_lazy().__str__()
-    assert x == "DummyNested(\n    a=???,\n    b=DummyFlat(\n        b=???,\n        c=3.14,\n    ),\n    c=3.14,\n)"
+    assert (
+        x
+        == "DummyNested(\n    a=???,\n    b=DummyFlat(\n        b=???,\n        c=3.14,\n    ),\n    c=3.14,\n)"
+    )
+
+
+def test_Lazy_frozen():
+    x = DummyNested.as_lazy()
+
+    with pytest.raises(AssertionError):
+        x.b = "hello"
+
+
+def test_Lazy__getattr__():
+    x = DummyNested.as_lazy(c=0.0)
+    assert x.c == 0.0
