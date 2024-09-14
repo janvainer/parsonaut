@@ -396,7 +396,8 @@ def unflatten_dict(flat: dict) -> dict:
                 # This should ignore choice flags such as --encoder ENCODER
                 if part in root and not isinstance(root[part], dict):
                     root[part] = {}
-
+                if part not in root:
+                    root[part] = {}
                 root = root[part]
 
         root[key] = value
