@@ -63,7 +63,6 @@ class ArgumentParser(_ArgumentParser):
                 type=str2bool,
                 default=value if value is not Missing else None,
                 metavar=f"{typ.__name__}",
-                help="Parameter descripion.",
                 required=required,
             )
         # int | float | str
@@ -77,7 +76,6 @@ class ArgumentParser(_ArgumentParser):
                 type=typ,
                 default=value,
                 metavar=f"{typ.__name__}",
-                help="Parameter descripion.",
                 required=required,
             )
         # tuple[bool | int | float |str , ...]
@@ -95,7 +93,6 @@ class ArgumentParser(_ArgumentParser):
                 metavar=metavar,
                 type=subtyp if subtyp != bool else str2bool,
                 default=tuple(value) if value is not Missing else None,
-                help="Parameter descripion loong this is a very loong description.",
                 required=required,
                 action=collect_as(tuple),
             )
