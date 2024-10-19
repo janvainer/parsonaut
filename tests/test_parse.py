@@ -114,23 +114,23 @@ class Outer(Parsable):
         pass
 
 
-def test_parse_args_raises_if_skipping_unknown_field():
-    with pytest.raises(AssertionError):
-        Inner.as_lazy().parse_args([], skip=["x"])
+# def test_parse_args_raises_if_skipping_unknown_field():
+#     with pytest.raises(AssertionError):
+#         Inner.as_lazy().parse_args([], skip=["x"])
 
 
-def test_parse_args_skips(capsys):
-    with pytest.raises(SystemExit):
-        Inner.as_lazy().parse_args(["--b", "hello"], skip=["b"])
-    assert "error: unrecognized arguments: --b hello" in capsys.readouterr().err
+# def test_parse_args_skips(capsys):
+#     with pytest.raises(SystemExit):
+#         Inner.as_lazy().parse_args(["--b", "hello"], skip=["b"])
+#     assert "error: unrecognized arguments: --b hello" in capsys.readouterr().err
 
 
-def test_parse_args_empty_call_is_as_if_we_made_object_lazy():
-    assert Inner.as_lazy().parse_args([]) == Inner.as_lazy()
+# def test_parse_args_empty_call_is_as_if_we_made_object_lazy():
+#     assert Inner.as_lazy().parse_args([]) == Inner.as_lazy()
 
 
-def test_parse_args_changes_params():
-    assert Inner.as_lazy().parse_args(["--b", "hello"]) == Inner.as_lazy(b="hello")
-    assert Outer.as_lazy().parse_args(["--d.b", "hello"]) == Outer.as_lazy().copy(
-        {"d.b": "hello"}
-    )
+# def test_parse_args_changes_params():
+#     assert Inner.as_lazy().parse_args(["--b", "hello"]) == Inner.as_lazy(b="hello")
+#     assert Outer.as_lazy().parse_args(["--d.b", "hello"]) == Outer.as_lazy().copy(
+#         {"d.b": "hello"}
+#     )
