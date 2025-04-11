@@ -2,6 +2,7 @@ import sys
 from argparse import SUPPRESS, Action
 from argparse import ArgumentParser as _ArgumentParser
 from argparse import ArgumentTypeError
+from collections import defaultdict
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -25,6 +26,8 @@ class ArgumentParser(_ArgumentParser):
         self.lazy_roots = list()
         self.args = dict()
         self.aliases = dict()
+        self.choices = defaultdict(list)
+        self.choices_defaults = dict()
         super().__init__(*args, **kwargs)
 
     def add_options(self, lzy: Lazy, dest: str):
@@ -38,17 +41,18 @@ class ArgumentParser(_ArgumentParser):
         for k, (typ, value) in sorted(lzy.signature.items()):
             if Lazy.is_lazy_type(typ):
                 if isinstance(value, Choices):
-                    if f"--{prefix}{k}" in sys.argv:
-                        val = sys.argv[sys.argv.index(f"--{prefix}{k}") + 1]
-                        value = type(value)[val]
-
                     self.add_argument(
                         f"--{prefix}{k}",
                         type=str,
                         choices=[e.name for e in type(value)],
                         default=value.name,
                     )
-                self._add_options(value, prefix=f"{prefix}{k}.")
+                    self.choices_defaults[f"{prefix}{k}"] = value.name
+                    for e in type(value):
+                        self.choices[f"{prefix}{k}"].append(e.name)
+                        self._add_options(e, prefix=f"{prefix}{k}.{e.name}.")
+                else:
+                    self._add_options(value, prefix=f"{prefix}{k}.")
             else:
                 self.add_option(f"{prefix}{k}", value, typ)
 
@@ -112,14 +116,59 @@ class ArgumentParser(_ArgumentParser):
 
         self.args[name] = kwargs
 
-    def parse_args(self, args=None):
+    def parse_args(self, args=None):  # noqa: C901
         from collections import defaultdict
 
         short_to_full = shorten_flags(self.args.keys())
+        full_to_short = {v: k for k, v in short_to_full.items()}
+
+        # Choices trimming:
+        # Check if user provided a specific value for a choice and trim the other options
+        for k, v in self.choices.items():
+
+            # If yes, read it from the command line
+            if (prefix := full_to_short[f"--{k}"]) in sys.argv:
+                position = sys.argv.index(prefix)
+                assert (
+                    len(sys.argv) > position + 1
+                ), f"Expected a value after the choice {prefix}"
+                val = sys.argv[sys.argv.index(prefix) + 1]
+                assert (
+                    val in v
+                ), f"error: argument {prefix}: invalid choice '{val}' (choose from {', '.join(v)})"
+            else:
+                val = self.choices_defaults[k]
+
+            # We remove choice options:
+            # - not selected by the user
+            # - not default
+            for choice in v:
+                if choice != val:
+                    remove_prefix = f"--{k}.{choice}"
+                    keys_to_remove = [
+                        (key, skey)
+                        for key, skey in full_to_short.items()
+                        if key.startswith(remove_prefix)
+                    ]
+                    for key, skey in keys_to_remove:
+                        del full_to_short[key]
+                        del short_to_full[skey]
+                        del self.args[key]
+
+            # And we have to remove the choice name suffix from the related variables
+            for key, skey in full_to_short.items():
+                if key.startswith(f"--{k}."):
+                    new_key = key.replace(f".{val}", "")
+                    new_skey = skey.replace(f"{val}.", "")
+                    short_to_full[new_skey] = new_key
+                    self.args[new_key] = self.args[key]
+                    del self.args[key]
+                    del short_to_full[skey]
 
         if short_to_full.pop("--help") is not None:
             super().add_argument("-h", "--help", **self.args["--help"])
 
+        # Now we pass the shortened and trimmedy flags to the parser
         for arg in short_to_full:
             full_name = short_to_full[arg]
             if full_name in self.aliases:
@@ -130,6 +179,9 @@ class ArgumentParser(_ArgumentParser):
             super().add_argument(*arg, **self.args[full_name])
 
         args = super().parse_args(args)
+
+        # We need to map the shortened names back to full names so that
+        # we can build the Lazy objects from the recursive dicts
         args_dict = vars(args)
         args_grouped = defaultdict(dict)
         for k, v in args_dict.items():
