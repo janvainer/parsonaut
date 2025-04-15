@@ -1,3 +1,4 @@
+import re
 import sys
 from argparse import SUPPRESS, Action
 from argparse import ArgumentParser as _ArgumentParser
@@ -28,13 +29,29 @@ class ArgumentParser(_ArgumentParser):
         self.aliases = dict()
         self.choices = defaultdict(list)
         self.choices_defaults = dict()
+        # We allow add_options without dest if it is the only source of
+        # args.
+        self._lazy_without_dest = False
+
         super().__init__(*args, **kwargs)
 
-    def add_options(self, lzy: Lazy, dest: str):
-        assert "." not in dest
-        assert dest not in self.lazy_roots
-        self.lazy_roots.append(dest)
-        self._add_options(lzy, prefix=f"{dest}.")
+    def add_options(self, lzy: Lazy, dest: str | None = None):
+        assert (
+            not self._lazy_without_dest
+        ), "Cannot add lazy options without a destination name if other lazy was already added."
+        if dest is not None:
+            assert "." not in dest
+            assert dest not in self.lazy_roots
+            self.lazy_roots.append(dest)
+        else:
+            assert set(self.args.keys()) == {
+                "--help"
+            }, "Cannot add lazy options without a destination name if other args are present"
+
+        prefix = f"{dest}." if dest is not None else ""
+        self._add_options(lzy, prefix=prefix)
+        if dest is None:
+            self._lazy_without_dest = True
 
     def _add_options(self, lzy: Lazy, prefix: str = ""):
         self.add_argument(f"--{prefix}_class", default=lzy.cls, help=SUPPRESS)
@@ -50,7 +67,9 @@ class ArgumentParser(_ArgumentParser):
                     self.choices_defaults[f"{prefix}{k}"] = value.name
                     for e in type(value):
                         self.choices[f"{prefix}{k}"].append(e.name)
-                        self._add_options(e, prefix=f"{prefix}{k}.{e.name}.")
+                        # Add a [] marker to highlight choice values.
+                        # We use the marks later to trim the choices.
+                        self._add_options(e, prefix=f"{prefix}{k}.[{e.name}].")
                 else:
                     self._add_options(value, prefix=f"{prefix}{k}.")
             else:
@@ -58,6 +77,7 @@ class ArgumentParser(_ArgumentParser):
 
     def add_option(self, name, value, typ):
         assert isinstance(name, str)
+        assert not self._lazy_without_dest
 
         name = f"--{name}"
         check_val = value if value is not Missing else None
@@ -107,6 +127,7 @@ class ArgumentParser(_ArgumentParser):
             raise
 
     def add_argument(self, *name_or_flags, **kwargs):
+        assert not self._lazy_without_dest
         if len(name_or_flags) == 2:
             alias, name = name_or_flags
             assert alias not in self.aliases
@@ -119,15 +140,15 @@ class ArgumentParser(_ArgumentParser):
     def parse_args(self, args=None):  # noqa: C901
         from collections import defaultdict
 
-        short_to_full = shorten_flags(self.args.keys())
-        full_to_short = {v: k for k, v in short_to_full.items()}
-
         # Choices trimming:
         # Check if user provided a specific value for a choice and trim the other options
-        for k, v in self.choices.items():
-
+        choices = sorted(
+            self.choices.items(), key=lambda x: len(x[0].split(".")), reverse=True
+        )
+        for k, v in choices:
             # If yes, read it from the command line
-            if (prefix := full_to_short[f"--{k}"]) in sys.argv:
+            prefix = re.sub(r"\[.*?\]\.", "", f"--{k}")
+            if prefix in sys.argv:
                 position = sys.argv.index(prefix)
                 assert (
                     len(sys.argv) > position + 1
@@ -144,39 +165,24 @@ class ArgumentParser(_ArgumentParser):
             # - not default
             for choice in v:
                 if choice != val:
-                    remove_prefix = f"--{k}.{choice}"
-                    keys_to_remove = [
-                        (key, skey)
-                        for key, skey in full_to_short.items()
-                        if key.startswith(remove_prefix)
-                    ]
-                    for key, skey in keys_to_remove:
-                        del full_to_short[key]
-                        del short_to_full[skey]
-                        del self.args[key]
+                    remove_prefix = f"--{k}.[{choice}]"
+                    for key in self.args.copy():
+                        if key.startswith(remove_prefix):
+                            del self.args[key]
 
-            # And we have to remove the choice name suffix from the related variables
-            for key, skey in full_to_short.items():
-                if key.startswith(f"--{k}."):
-                    new_key = key.replace(f".{val}", "")
-                    new_skey = skey.replace(f"{val}.", "")
-                    short_to_full[new_skey] = new_key
-                    self.args[new_key] = self.args[key]
-                    del self.args[key]
-                    del short_to_full[skey]
+        for k in self.args.copy():
+            if "[" in k:
+                kk = re.sub(r"\[.*?\]\.", "", k)
+                self.args[kk] = self.args[k]
+                del self.args[k]
 
-        if short_to_full.pop("--help") is not None:
-            super().add_argument("-h", "--help", **self.args["--help"])
-
-        # Now we pass the shortened and trimmedy flags to the parser
-        for arg in short_to_full:
-            full_name = short_to_full[arg]
-            if full_name in self.aliases:
-                arg = (self.aliases[full_name], arg)
+        # Now we pass the shortened and trimmed flags to the parser
+        for name in self.args:
+            if name in self.aliases:
+                arg = (self.aliases[name], name)
             else:
-                arg = (arg,)
-
-            super().add_argument(*arg, **self.args[full_name])
+                arg = (name,)
+            super().add_argument(*arg, **self.args[name])
 
         args = super().parse_args(args)
 
@@ -185,7 +191,9 @@ class ArgumentParser(_ArgumentParser):
         args_dict = vars(args)
         args_grouped = defaultdict(dict)
         for k, v in args_dict.items():
-            k = short_to_full["--" + k].replace("--", "")
+            # Do not add choices names
+            if k in self.choices:
+                continue
             if not k.startswith(tuple(self.lazy_roots)):
                 args_grouped[k] = v
             else:
@@ -195,10 +203,13 @@ class ArgumentParser(_ArgumentParser):
                 args_grouped[root][k.split(f"{root}.", 1)[-1]] = v
 
         args_grouped = dict(args_grouped)
-        for root in self.lazy_roots:
-            args_grouped[root] = Lazy.from_dict(args_grouped[root])
+        if self.lazy_roots:
+            for root in self.lazy_roots:
+                args_grouped[root] = Lazy.from_dict(args_grouped[root])
 
-        return SimpleNamespace(**args_grouped)
+            return SimpleNamespace(**args_grouped)
+        else:
+            return Lazy.from_dict(args_grouped)
 
 
 @dataclass
