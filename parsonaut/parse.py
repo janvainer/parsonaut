@@ -4,7 +4,6 @@ from argparse import SUPPRESS, Action
 from argparse import ArgumentParser as _ArgumentParser
 from argparse import ArgumentTypeError
 from collections import defaultdict
-from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 from parsonaut.lazy import Choices, Lazy
@@ -210,72 +209,6 @@ class ArgumentParser(_ArgumentParser):
             return SimpleNamespace(**args_grouped)
         else:
             return Lazy.from_dict(args_grouped)
-
-
-@dataclass
-class Trie:
-    children: dict[str, "Trie"] = field(default_factory=dict)
-    n_suffixes: int = 0
-
-    def insert(self, x: list[str]):
-        if not x:
-            return self
-
-        prefix, remainder = x[0], x[1:]
-        self.n_suffixes += 1
-        if prefix in self.children:
-            self.children[prefix].insert(remainder)
-        else:
-            self.children[prefix] = Trie().insert(remainder)
-
-        return self
-
-    def list_sequences(self):
-        prefixes = []
-        for prefix, child in self.children.items():
-            if child.n_suffixes == 0:
-                prefixes.append([prefix])
-            else:
-                suffixes = child.list_sequences()
-                for s in suffixes:
-                    prefixes.append([prefix] + s)
-        return prefixes
-
-    def find_unique_shortest_prefixes(self):
-        prefixes = []
-        full_sequences = []
-
-        for prefix, child in self.children.items():
-            if child.n_suffixes in (0, 1):
-                # Prefix is unique if the subtree has a single leaf
-                prefixes.append([prefix])
-                # Collect the rest of the subtree
-                fs = [[prefix] + seq for seq in child.list_sequences()]
-                if fs:
-                    full_sequences.extend(fs)
-                else:
-                    full_sequences.append([prefix])
-            else:
-                for p, f in zip(*child.find_unique_shortest_prefixes()):
-                    prefixes.append([prefix] + p)
-                    full_sequences.append([prefix] + f)
-        return prefixes, full_sequences
-
-
-def shorten_flags(args: list[str]) -> dict[str, str]:
-    sep = "."
-    trie = Trie()
-    for arg in args:
-        trie.insert(arg.split(sep)[::-1])
-
-    prefixes, full_sequences = trie.find_unique_shortest_prefixes()
-    prefixes = [
-        ("--" if not p[-1].startswith("--") else "") + ".".join(p[::-1])
-        for p in prefixes
-    ]
-    full_sequences = [".".join(s[::-1]) for s in full_sequences]
-    res = {prefix: full for prefix, full in zip(prefixes, full_sequences)}
-    return dict(sorted(res.items()))
 
 
 def collect_as(coll_type):
