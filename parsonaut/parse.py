@@ -6,7 +6,7 @@ from argparse import ArgumentTypeError
 from collections import defaultdict
 from types import SimpleNamespace
 
-from parsonaut.lazy import Choices, Lazy
+from parsonaut.lazy import TYPE_NAME, Choices, Lazy
 from parsonaut.typecheck import (
     Missing,
     get_flat_tuple_inner_type,
@@ -139,6 +139,8 @@ class ArgumentParser(_ArgumentParser):
     def parse_args(self, args=None):  # noqa: C901
         from collections import defaultdict
 
+        args = sys.argv[1:] if args is None else args
+
         # Choices trimming:
         # Check if user provided a specific value for a choice and trim the other options
         choices = sorted(
@@ -147,12 +149,12 @@ class ArgumentParser(_ArgumentParser):
         for k, v in choices:
             # If yes, read it from the command line
             prefix = re.sub(r"\[.*?\]\.", "", f"--{k}")
-            if prefix in sys.argv:
-                position = sys.argv.index(prefix)
+            if prefix in args:
+                position = args.index(prefix)
                 assert (
-                    len(sys.argv) > position + 1
+                    len(args) > position + 1
                 ), f"Expected a value after the choice {prefix}"
-                val = sys.argv[sys.argv.index(prefix) + 1]
+                val = args[args.index(prefix) + 1]
                 assert (
                     val in v
                 ), f"error: argument {prefix}: invalid choice '{val}' (choose from {', '.join(v)})"
@@ -175,7 +177,6 @@ class ArgumentParser(_ArgumentParser):
                 self.args[kk] = self.args[k]
                 del self.args[k]
 
-        # Now we pass the shortened and trimmed flags to the parser
         for name in self.args:
             if name in self.aliases:
                 arg = (self.aliases[name], name)
@@ -185,7 +186,6 @@ class ArgumentParser(_ArgumentParser):
 
         args = super().parse_args(args)
 
-        # We need to map the shortened names back to full names so that
         # we can build the Lazy objects from the recursive dicts
         args_dict = vars(args)
         args_grouped = defaultdict(dict)
@@ -207,8 +207,10 @@ class ArgumentParser(_ArgumentParser):
                 args_grouped[root] = Lazy.from_dict(args_grouped[root])
 
             return SimpleNamespace(**args_grouped)
-        else:
+        elif TYPE_NAME in args_grouped:
             return Lazy.from_dict(args_grouped)
+        else:
+            return SimpleNamespace(**args_grouped)
 
 
 def collect_as(coll_type):
