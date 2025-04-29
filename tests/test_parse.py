@@ -1,6 +1,6 @@
 import pytest
 
-from parsonaut.lazy import Lazy, Missing, Parsable
+from parsonaut.lazy import Choices, Lazy, Missing, Parsable
 from parsonaut.parse import BOOL_FALSE_FLAGS, BOOL_TRUE_FLAGS, ArgumentParser, str2bool
 
 
@@ -98,9 +98,18 @@ def test_ArgumentParser_add_flat_tuple_with_bools(typ, value):
 class Inner(Parsable):
     def __init__(
         self,
-        a,
-        b: str,
-        c: int = 1,
+        x,
+        a: str,
+        b: int = 1,
+    ) -> None:
+        pass
+
+
+class Inner2(Parsable):
+    def __init__(
+        self,
+        aa: str,
+        bb: int = 1,
     ) -> None:
         pass
 
@@ -108,29 +117,49 @@ class Inner(Parsable):
 class Outer(Parsable):
     def __init__(
         self,
-        d: Lazy[Inner, ...] = Inner.as_lazy(),
-        e: str = "hello",
+        c: Lazy[Inner, ...] = Inner.as_lazy(),
+        d: str = "hello",
     ) -> None:
         pass
 
 
-def test_parse_args_raises_if_skipping_unknown_field():
-    with pytest.raises(AssertionError):
-        Inner.as_lazy().parse_args([], skip=["x"])
+class Choice(Choices):
+    I1: Lazy[Inner, ...] = Inner.as_lazy()
+    I2: Lazy[Inner2, ...] = Inner2.as_lazy()
 
 
-def test_parse_args_skips(capsys):
-    with pytest.raises(SystemExit):
-        Inner.as_lazy().parse_args(["--b", "hello"], skip=["b"])
-    assert "error: unrecognized arguments: --b hello" in capsys.readouterr().err
+class Outer2(Parsable):
+    def __init__(
+        self,
+        c: Choice = Choice.I1,
+        d: str = "hello",
+    ) -> None:
+        pass
 
 
-def test_parse_args_empty_call_is_as_if_we_made_object_lazy():
-    assert Inner.as_lazy().parse_args([]) == Inner.as_lazy()
+def test_ArgumentParser_add_options_flat():
+    parser = ArgumentParser()
+    parser.add_options(Inner.as_lazy())
+
+    args = parser.parse_args(["--a", "3"])
+    assert args == Inner.as_lazy(a="3")
 
 
-def test_parse_args_changes_params():
-    assert Inner.as_lazy().parse_args(["--b", "hello"]) == Inner.as_lazy(b="hello")
-    assert Outer.as_lazy().parse_args(["--d.b", "hello"]) == Outer.as_lazy().copy(
-        {"d.b": "hello"}
+def test_ArgumentParser_add_options_nested():
+    parser = ArgumentParser()
+    parser.add_options(Outer.as_lazy())
+
+    args = parser.parse_args(["--c.a", "3", "--d", "okay"])
+    assert args == Outer.as_lazy(
+        c=Inner.as_lazy(a="3"),
+        d="okay",
+    )
+
+
+def test_ArgumentParser_choices():
+    parser = ArgumentParser()
+    parser.add_options(Outer2.as_lazy())
+    args = parser.parse_args(["--c", "I2", "--c.aa", "something"])
+    assert args == Outer2.as_lazy(
+        c=Inner2.as_lazy(aa="something"),
     )

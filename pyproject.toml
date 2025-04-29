@@ -7,4 +7,3 @@ testpaths = [
 
 [tool.isort]
 profile = "black"
-

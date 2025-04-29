@@ -1,7 +1,7 @@
+from enum import Enum
 from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
-from .parse import ArgumentParser
 from .typecheck import Missing, MissingType, is_parsable_type
 
 T = TypeVar("T")
@@ -53,17 +53,32 @@ class Lazy(Generic[T, P]):
         return lazy_str(self.to_dict(with_class_tag=True))
 
     def __getattr__(self, x):
-        assert x in self.signature
-        return self.signature[x][1]
+        signature = object.__getattribute__(self, "signature")
+        if x not in signature:
+            return object.__getattribute__(self, x)
+        else:
+            return signature[x][1]
 
-    def __setattr__(self, *ags):
-        raise AssertionError("Cannot set attributes of Lazy class")
+    def __setattr__(self, *args):
+        # This is here for Enum support, otherwise all frozen
+        if args[0] in (
+            "_value_",
+            "_name_",
+            "__objclass__",
+            "_sort_order_",
+        ):
+            object.__setattr__(self, args[0], args[1])
+        else:
+            raise AssertionError("Cannot set attributes of Lazy class")
 
     @property
     def signature(self) -> Mapping[str, KeyTypes]:
-        if isinstance(self._signature, partial):
-            object.__setattr__(self, "_signature", self._signature())
-        return self._signature
+        # This is here to prevent infinite recursion.
+        _signature = object.__getattribute__(self, "_signature")
+        if isinstance(_signature, partial):
+            _signature = _signature()
+            object.__setattr__(self, "_signature", _signature)
+        return _signature
 
     @staticmethod
     def is_lazy_type(typ):
@@ -233,30 +248,6 @@ class Lazy(Generic[T, P]):
             **kwargs,
         )
 
-    def parse_args(
-        self: "Lazy[B, A]", args: list[str] | None = None, skip: list[str] | None = None
-    ) -> "Lazy[B, A]":
-        dct = self.to_dict(with_annotations=True, with_class_tag=True, flatten=True)
-
-        if skip is not None:
-            skip = set(skip)
-            assert skip <= set(dct)
-            dct = {k: v for k, v in dct.items() if k not in skip}
-
-        parsed_dict = {}
-        parser = ArgumentParser()
-
-        for name, x in dct.items():
-            if "_class" in name:
-                continue
-
-            typ, value = x
-            parser.add_option(name, value, typ)
-
-        args = parser.parse_args(args)
-        parsed_dict.update(vars(args))
-        return self.copy(parsed_dict)
-
 
 class ParsableMeta(type):
     def __call__(cls, *args, **kwargs):
@@ -313,6 +304,20 @@ class Parsable(metaclass=ParsableMeta):
         # For now we assume the dict contains TYPE_NAME
         # In the future, we should be able to infer the TYPE_NAME also for sub-classes from defaults
         return Lazy.from_class(cls).from_dict(dct).to_eager()
+
+
+class Choices(Lazy, Enum):
+    def __new__(cls, value):
+        assert isinstance(
+            value, Lazy
+        ), f"Choice values must be an instance of Lazy. Got {type(value)}"
+        obj = Lazy.__new__(cls)
+        return obj
+
+    def __init__(self, *args):
+        (orig_lazy,) = args
+        object.__setattr__(self, "cls", orig_lazy.cls)
+        object.__setattr__(self, "_signature", orig_lazy._signature)
 
 
 def should_typecheck_eagerly():
@@ -388,7 +393,11 @@ def unflatten_dict(flat: dict) -> dict:
             *parts, key = key.split(".")
 
             for part in parts:
-                root.setdefault(part, {})
+                # This should ignore choice flags such as --encoder ENCODER
+                if part in root and not isinstance(root[part], dict):
+                    root[part] = {}
+                if part not in root:
+                    root[part] = {}
                 root = root[part]
 
         root[key] = value
