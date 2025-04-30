@@ -124,8 +124,8 @@ class Outer(Parsable):
 
 
 class Choice(Choices):
-    I1: Lazy[Inner, ...] = Inner.as_lazy()
-    I2: Lazy[Inner2, ...] = Inner2.as_lazy()
+    I1 = Inner.as_lazy()
+    I2 = Inner2.as_lazy()
 
 
 class Outer2(Parsable):
