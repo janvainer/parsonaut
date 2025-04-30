@@ -1,3 +1,7 @@
+<div align="center">
+<img src="parsonaut.jpg" width="100" height="100" alt="Parsonaut"/>
+</div>
+
 # Parsonaut
 
 Auto-configure your experiments from the CLI.
