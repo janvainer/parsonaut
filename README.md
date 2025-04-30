@@ -87,6 +87,7 @@ If we run the script, we can check how the configuration looks like.
 Let's try `python my_script.py --opt.lr 20`
 
 ```python
+# This is just a configuration, not the actual objects
 Params(
     model=Model(
         dropout=0.1,
@@ -185,13 +186,13 @@ options:
   --model.num_layers2 int
 ```
 
-Now we can the script with `python my_script.py --model MODEL2`, and we are going to select the second model instead of the defaul.
+Now we can call the script like `python my_script.py --model MODEL2`, and we are going to select the second model instead of the defaul.
 
 ```bash
 Params(
     model=Model2(
-        dropout=0.1,
-        num_layers=4,
+        dropout2=0.1,
+        num_layers2=4,
     ),
 )
 ```
