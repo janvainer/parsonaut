@@ -362,11 +362,10 @@ def test_Parsable_as_lazy():
 def test_Parsable_init_options(obj):
     assert hasattr(obj, "_cfg")
 
-    assert set(obj._cfg.keys()) == {"_class", "b", "c"}
     assert obj.a == 5
-    assert obj.b == "hello" == obj._cfg["b"]
-    assert obj.c == 3.14 == obj._cfg["c"]
-    assert obj._cfg["_class"] == DummyFlat
+    assert obj.b == "hello" == obj._cfg.b
+    assert obj.c == 3.14 == obj._cfg.c
+    assert obj._cfg.cls == DummyFlat
 
 
 def test_Parsable_as_lazy_raises_for_non_parsable_args_in_eager_mode():
@@ -439,7 +438,7 @@ def test_Parsable_from_dict_flat():
             "b.c": 3.14,
             "c": 3.14,
         }
-    )
+    ).to_eager()
     assert x._cfg == y._cfg
     assert x.a == y.a
     assert x.c == y.c
@@ -462,7 +461,7 @@ def test_Parsable_from_dict_nested():
             },
             "c": 3.14,
         }
-    )
+    ).to_eager()
     assert x._cfg == y._cfg
     assert x.a == y.a
     assert x.c == y.c

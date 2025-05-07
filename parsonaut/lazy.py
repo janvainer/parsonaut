@@ -2,6 +2,7 @@ from enum import Enum
 from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
+from .serialization import Serializable, maybe_import
 from .typecheck import Missing, MissingType, is_parsable_type
 
 T = TypeVar("T")
@@ -15,7 +16,7 @@ TYPECHECK_EAGER = False
 TYPE_NAME = "_class"
 
 
-class Lazy(Generic[T, P]):
+class Lazy(Generic[T, P], Serializable):
     """
     A mixin class that allows for lazy initialization of a class instance.
     """
@@ -189,11 +190,14 @@ class Lazy(Generic[T, P]):
         recursive: bool = True,
         with_annotations: bool = False,
         with_class_tag: bool = False,
+        with_class_tag_as_str: bool = False,
         flatten: bool = False,
     ):
         dct = dict()
         if with_class_tag:
             dct[TYPE_NAME] = self.cls
+        elif with_class_tag_as_str:
+            dct[TYPE_NAME] = f"{self.cls.__module__}.{self.cls.__name__}"
         for k, (typ, value) in sorted(self.signature.items()):
 
             if Lazy.is_lazy_type(typ):
@@ -203,6 +207,7 @@ class Lazy(Generic[T, P]):
                         recursive=recursive,
                         with_annotations=with_annotations,
                         with_class_tag=with_class_tag,
+                        with_class_tag_as_str=with_class_tag_as_str,
                     )
                 dct[k] = value
             else:
@@ -225,7 +230,8 @@ class Lazy(Generic[T, P]):
 
         signature = dict()
 
-        cls = dct[TYPE_NAME]
+        cls = maybe_import(dct[TYPE_NAME])
+
         for k, v in dct.items():
             if k == TYPE_NAME:
                 continue
@@ -252,9 +258,7 @@ class Lazy(Generic[T, P]):
 class ParsableMeta(type):
     def __call__(cls, *args, **kwargs):
 
-        cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs).to_dict(
-            with_class_tag=True,
-        )
+        cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs)
 
         # https://stackoverflow.com/a/73923070/8378586
         obj = cls.__new__(cls, *args, **kwargs)
@@ -264,46 +268,59 @@ class ParsableMeta(type):
         return obj
 
 
-class Parsable(metaclass=ParsableMeta):
+class class_or_instance_method(object):
+    def __init__(self, f):
+        self.f = f
 
-    _cfg: dict
+    def __get__(self, instance, owner):
+        if instance is not None:
+            class_or_instance = instance
+        else:
+            class_or_instance = owner
 
-    @classmethod
-    def as_lazy(cls: Callable[A, B], *args: A.args, **kwargs: A.kwargs) -> "Lazy[B, A]":
-        return Lazy.from_class(cls, *args, **kwargs)
+        def newfunc(*args, **kwargs):
+            return self.f(class_or_instance, *args, **kwargs)
 
-    @classmethod
-    def parse_args(
-        cls: "Callable[A, B] | Parsable", args: list[str] | None = None
-    ) -> B:
-        return cls.as_lazy().parse_args(args).to_eager()
+        return newfunc
+
+
+class Parsable(Serializable, metaclass=ParsableMeta):
+
+    _cfg: Lazy
+
+    @class_or_instance_method
+    def as_lazy(cls_or_self, *args, **kwargs) -> Lazy:
+        if isinstance(cls_or_self, Parsable):
+            assert not args, "Cannot override once configured Parsable."
+            assert not kwargs, "Cannot override once configured Parsable."
+            return cls_or_self._cfg
+        else:
+            return Lazy.from_class(cls_or_self, *args, **kwargs)
 
     def to_dict(
         self,
         with_class_tag: bool = False,
+        with_class_tag_as_str: bool = False,
         flatten: bool = False,
     ):
-        def remove_class_tag(dct):
-            return {
-                k: (v if not isinstance(v, dict) else remove_class_tag(v))
-                for k, v in dct.items()
-                if k != TYPE_NAME
-            }
-
-        dct = self._cfg
-        if not with_class_tag:
-            dct = remove_class_tag(self._cfg)
-
-        if flatten:
-            dct = flatten_dict(dct)
-
-        return dct
+        return self._cfg.to_dict(
+            with_class_tag=with_class_tag,
+            with_class_tag_as_str=with_class_tag_as_str,
+            flatten=flatten,
+        )
 
     @classmethod
-    def from_dict(cls, dct):
-        # For now we assume the dict contains TYPE_NAME
-        # In the future, we should be able to infer the TYPE_NAME also for sub-classes from defaults
-        return Lazy.from_class(cls).from_dict(dct).to_eager()
+    def from_dict(cls, dct) -> Lazy:
+        return Lazy.from_class(cls).from_dict(dct)
+
+    @classmethod
+    def parse_args(cls, *args, **kwargs) -> Lazy:
+        from .parse import ArgumentParser
+
+        parser = ArgumentParser()
+        parser.add_options(cls.as_lazy(*args, **kwargs))
+        params = parser.parse_args()
+        return params
 
 
 class Choices(Lazy, Enum):
