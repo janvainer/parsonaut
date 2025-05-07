@@ -4,6 +4,8 @@ from setuptools import setup
 
 project_root = Path(__file__).parent
 
+install_requires = ["PyYAML==6.0.2"]
+
 tests_require = [
     "pytest==8.1.1",
     "pytest-cov==4.1.0",
@@ -26,6 +28,7 @@ setup(
     author_email="vainerjan@gmail.com",
     description="Description of my package",
     packages=["parsonaut"],
+    install_requires=install_requires,
     extras_require={
         "tests": tests_require,
         "dev": dev_requires,
