@@ -243,7 +243,7 @@ class Lazy(Generic[T, P], Serializable):
         return Lazy.from_class(cls, **signature)
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
-        assert not args
+        assert not args, "Please pass named parameters only."
 
         kwargs2 = self.to_dict(recursive=False)
         kwargs = {**kwargs2, **kwargs}
