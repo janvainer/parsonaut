@@ -15,6 +15,7 @@ tests_require = [
     "coverage==7.4.3",
     "codecov==2.1.13",
     "pre-commit==3.6.2",
+    "torch",
 ]
 
 dev_requires = sorted(tests_require + ["pre-commit==3.6.2"])

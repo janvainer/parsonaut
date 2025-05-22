@@ -1,6 +1,7 @@
 import pytest
 
-from parsonaut.lazy import Choices, Lazy, Missing, Parsable
+from parsonaut import Choices, Lazy, Parsable
+from parsonaut.lazy import Missing
 from parsonaut.parse import BOOL_FALSE_FLAGS, BOOL_TRUE_FLAGS, ArgumentParser, str2bool
 
 

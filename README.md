@@ -35,10 +35,10 @@ options:
   --out_channels int
 """
 import torch.nn as nn
-from parsonaut import CheckpointMixin
+from parsonaut import Parsable
 
 
-class Model(nn.Module, CheckpointMixin):
+class Model(nn.Module, Parsable):
     def __init__(
         self,
         in_channels: int = 4,

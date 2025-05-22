@@ -26,10 +26,10 @@ import torch.nn as nn
 from torch.optim import SGD as SGD_
 from torch.optim import Adam as Adam_
 
-from parsonaut import CheckpointMixin, Choices, Lazy, Parsable
+from parsonaut import Choices, Lazy, Parsable
 
 
-class Model(nn.Module, CheckpointMixin):
+class Model(nn.Module, Parsable):
     def __init__(
         self,
         # Use str, int, float, bool, or tuple of those
@@ -40,7 +40,7 @@ class Model(nn.Module, CheckpointMixin):
         self.linear = nn.Linear(in_channels, out_channels)
 
 
-class SGD(SGD_, CheckpointMixin):
+class SGD(SGD_, Parsable):
     def __init__(
         self,
         params,
@@ -60,7 +60,7 @@ class SGD(SGD_, CheckpointMixin):
         )
 
 
-class Adam(Adam_, CheckpointMixin):
+class Adam(Adam_, Parsable):
     def __init__(
         self,
         params,
