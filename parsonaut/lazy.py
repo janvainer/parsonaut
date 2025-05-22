@@ -84,7 +84,7 @@ class Lazy(Generic[T, P], Serializable):
     @staticmethod
     def is_lazy_type(typ):
         origin = getattr(typ, "__origin__", None)
-        if origin is None and issubclass(typ, Lazy):
+        if origin is None and isinstance(typ, type) and issubclass(typ, Lazy):
             return True
         elif origin == Lazy:
             return True

@@ -109,7 +109,7 @@ class Inner2(Parsable):
     def __init__(
         self,
         aa: str,
-        bb: int = 1,
+        bb: int | None = 1,
     ) -> None:
         pass
 

@@ -1,4 +1,5 @@
 from itertools import combinations
+from typing import Optional, Union
 
 import pytest
 
@@ -9,6 +10,7 @@ from parsonaut.typecheck import (
     is_flat_tuple_type,
     is_float_type,
     is_int_type,
+    is_optional_single_type,
     is_parsable_type,
     is_str_type,
 )
@@ -130,3 +132,21 @@ def test_is_parsable_type_accepts(typ):
     assert is_parsable_type(tuple[typ])
     assert is_parsable_type(tuple[typ, typ])
     assert is_parsable_type(tuple[typ, ...])
+
+
+@pytest.mark.parametrize(
+    "typ, value, expected",
+    [
+        (int | None, None, (True, int)),
+        (int | None, 5, (True, int)),
+        (int | None, "hi", (False, int)),
+        (Optional[str], "hello", (True, str)),
+        (Optional[str], None, (True, str)),
+        (Optional[str], 123, (False, str)),
+        (int, 42, (False, int)),
+        (Union[int, str], "hello", (False, Union[int, str])),
+        (Union[int, None, str], None, (False, Union[int, None, str])),
+    ],
+)
+def test_is_optional_single_type(typ, value, expected):
+    assert is_optional_single_type(typ, value) == expected

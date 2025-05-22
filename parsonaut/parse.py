@@ -14,6 +14,7 @@ from parsonaut.typecheck import (
     is_flat_tuple_type,
     is_float_type,
     is_int_type,
+    is_optional_single_type,
     is_str_type,
 )
 
@@ -81,6 +82,8 @@ class ArgumentParser(_ArgumentParser):
         name = f"--{name}"
         check_val = value if value is not Missing else None
         required = False
+
+        _, typ = is_optional_single_type(typ, None)
 
         # bool
         if is_bool_type(typ):
