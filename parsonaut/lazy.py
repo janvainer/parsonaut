@@ -117,6 +117,8 @@ class Lazy(Generic[T, P], Serializable):
     def get_signature(
         cl, *args, skip_non_parsable: bool = False, **kwargs
     ) -> Mapping[str, KeyTypes]:
+        from .parsable import Parsable  # needed for some asserts
+
         func = cl.__init__
         signature = get_signature(func, *args, **kwargs)
 
@@ -128,6 +130,7 @@ class Lazy(Generic[T, P], Serializable):
                 # fill in missing default
                 if value is Missing and (subtyp := get_args(typ)):
                     subtyp, *_ = subtyp
+                    assert issubclass(subtyp, Parsable)
                     value = Lazy.from_class(subtyp)  # type: ignore
                 # or ensure correct type
                 else:

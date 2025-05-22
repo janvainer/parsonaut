@@ -3,11 +3,11 @@ from functools import partial
 
 import pytest
 
+from parsonaut import Parsable
 from parsonaut.lazy import (
     Lazy,
     Missing,
     MissingType,
-    Parsable,
     flatten_dict,
     get_signature,
     set_typecheck_eager,
