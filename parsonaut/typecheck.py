@@ -1,6 +1,7 @@
 from builtins import Ellipsis
 from functools import lru_cache
-from typing import Any, Type, get_args, get_origin
+from types import UnionType
+from typing import Any, Type, Union, get_args, get_origin
 
 BASIC_TYPES = (int, float, bool, str)
 
@@ -74,6 +75,24 @@ def is_flat_tuple_type(typ: Type, value: Any | None = None) -> bool:
         )
 
 
+def is_optional_single_type(typ: Type, value: Any | None):
+    """
+    Returns (True, T) if tp is exactly Optional[T], i.e., Union[T, None] with only one non-None type.
+    Returns (False, tp) otherwise.
+    """
+    if (
+        isinstance(typ, UnionType)  # e.g. int | None
+        or getattr(typ, "__origin__", None) is Union
+    ):
+        args = get_args(typ)
+        non_none_args = [a for a in args if a is not type(None)]
+        if len(non_none_args) == 1:
+            typ = non_none_args[0]
+            is_ok = True if value is None else isinstance(value, typ)
+            return is_ok, non_none_args[0]
+    return False, typ
+
+
 @lru_cache(maxsize=1)
 def _is_flat_tuple_type(typ: Type, args):
     return (
@@ -87,6 +106,23 @@ def _is_flat_tuple_type(typ: Type, args):
 
 
 def is_parsable_type(typ: Type, value: Any | None = None) -> bool:
+    """Check if the given type is parsable.
+
+    Args:
+        typ (Type): The type to check.
+        value (Any | None, optional): The value to check against. Defaults to None.
+
+    Returns:
+        bool: True if the type is parsable, False otherwise.
+    """
+    is_optional, inner_type = is_optional_single_type(typ, value)
+    if is_optional:
+        return is_parsable_type_single(inner_type, value)
+    else:
+        return is_parsable_type_single(typ, value)
+
+
+def is_parsable_type_single(typ: Type, value: Any | None = None) -> bool:
     """Check if the given type is parsable.
 
     Args:
