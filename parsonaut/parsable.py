@@ -1,8 +1,11 @@
-from .lazy import Lazy
+from abc import ABCMeta
+from typing import Callable, Type
+
+from .lazy import Lazy, P, T
 from .serialization import Serializable, is_module_available, open_best
 
 
-class ParsableMeta(type):
+class ParsableMeta(ABCMeta):
     def __call__(cls, *args, **kwargs):
 
         cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs)
@@ -67,7 +70,7 @@ class Parsable(Serializable, metaclass=ParsableMeta):
         return Lazy.from_class(cls).from_dict(dct)
 
     @classmethod
-    def parse_args(cls, *args, **kwargs) -> Lazy:
+    def parse_args(cls: Type[T] | Callable[P, T], *args, **kwargs) -> Lazy[T, P]:
         from .parse import ArgumentParser
 
         parser = ArgumentParser()
