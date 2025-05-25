@@ -1,8 +1,9 @@
+from abc import ABCMeta
 from .lazy import Lazy
 from .serialization import Serializable, is_module_available, open_best
 
 
-class ParsableMeta(type):
+class ParsableMeta(ABCMeta):
     def __call__(cls, *args, **kwargs):
 
         cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs)
