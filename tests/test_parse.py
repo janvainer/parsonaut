@@ -164,3 +164,28 @@ def test_ArgumentParser_choices():
     assert args == Outer2.as_lazy(
         c=Inner2.as_lazy(aa="something"),
     )
+
+
+class WithOptional(Parsable):
+    def __init__(
+        self,
+        b: int | None = 1,
+    ) -> None:
+        pass
+
+
+def test_ArgumentParser_simple_optional():
+    parser = ArgumentParser()
+    parser.add_options(WithOptional.as_lazy())
+    args = parser.parse_args([])
+    assert args == WithOptional.as_lazy(b=1)
+
+    parser = ArgumentParser()
+    parser.add_options(WithOptional.as_lazy())
+    args = parser.parse_args(["--b", "5"])
+    assert args == WithOptional.as_lazy(b=5)
+
+    parser = ArgumentParser()
+    parser.add_options(WithOptional.as_lazy())
+    args = parser.parse_args(["--b"])
+    assert args == WithOptional.as_lazy(b=None)

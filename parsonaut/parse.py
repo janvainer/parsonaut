@@ -83,7 +83,8 @@ class ArgumentParser(_ArgumentParser):
         check_val = value if value is not Missing else None
         required = False
 
-        _, typ = is_optional_single_type(typ, None)
+        # Optional args not supported for tuples yet
+        is_optional, typ = is_optional_single_type(typ, None)
 
         # bool
         if is_bool_type(typ):
@@ -93,6 +94,9 @@ class ArgumentParser(_ArgumentParser):
                 default=value if value is not Missing else None,
                 metavar=f"{typ.__name__}",
                 required=required,
+                # For int | None and similar, the user can specify --foo without a value.
+                # In such case, the const=None value is used.
+                nargs="?" if is_optional else None,
             )
         # int | float | str
         elif (
@@ -106,6 +110,7 @@ class ArgumentParser(_ArgumentParser):
                 default=value,
                 metavar=f"{typ.__name__}",
                 required=required,
+                nargs="?" if is_optional else None,
             )
         # tuple[bool | int | float |str , ...]
         elif is_flat_tuple_type(typ, check_val):
