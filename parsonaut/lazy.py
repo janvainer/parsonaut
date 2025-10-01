@@ -3,7 +3,7 @@ from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
 from .serialization import Serializable, maybe_import
-from .typecheck import Missing, MissingType, is_flat_tuple_type, is_parsable_type
+from .typecheck import Missing, MissingType, is_parsable_type, is_flat_tuple_type
 
 T = TypeVar("T")
 P = ParamSpec("P")
