@@ -71,6 +71,7 @@ class ParsableSerializable(Parsable):
 @pytest.mark.parametrize("extension", ["json", "yaml"])
 def test_parsable_serializable_to_from_file(extension):
     from parsonaut.lazy import set_typecheck_eager
+
     set_typecheck_eager(True)
 
     obj = ParsableSerializable(value=42, value2=(4, 5, 6))
