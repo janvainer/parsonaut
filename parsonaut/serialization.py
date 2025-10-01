@@ -6,7 +6,7 @@ import yaml
 
 
 class DictSerializable:
-    def to_dict(self, with_class_tag_as_str) -> dict:
+    def to_dict(self, with_class_tag_as_str, tuples_as_lists) -> dict:
         raise NotImplementedError
 
     @classmethod
@@ -16,7 +16,7 @@ class DictSerializable:
 
 class YamlMixin(DictSerializable):
     def to_yaml(self, pth):
-        dct = self.to_dict(with_class_tag_as_str=True)
+        dct = self.to_dict(with_class_tag_as_str=True, tuples_as_lists=True)
         save_yaml(dct, pth)
 
     @classmethod
@@ -27,7 +27,7 @@ class YamlMixin(DictSerializable):
 
 class JsonMixin(DictSerializable):
     def to_json(self, pth: str):
-        dct = self.to_dict(with_class_tag_as_str=True)
+        dct = self.to_dict(with_class_tag_as_str=True, tuples_as_lists=True)
         save_json(dct, pth)
 
     @classmethod

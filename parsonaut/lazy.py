@@ -3,7 +3,7 @@ from functools import partial
 from typing import Any, Callable, Generic, Mapping, ParamSpec, Type, TypeVar, get_args
 
 from .serialization import Serializable, maybe_import
-from .typecheck import Missing, MissingType, is_parsable_type
+from .typecheck import Missing, MissingType, is_parsable_type, is_flat_tuple_type
 
 T = TypeVar("T")
 P = ParamSpec("P")
@@ -194,6 +194,7 @@ class Lazy(Generic[T, P], Serializable):
         with_class_tag: bool = False,
         with_class_tag_as_str: bool = False,
         flatten: bool = False,
+        tuples_as_lists: bool = False,
     ):
         dct = dict()
         if with_class_tag:
@@ -201,6 +202,8 @@ class Lazy(Generic[T, P], Serializable):
         elif with_class_tag_as_str:
             dct[TYPE_NAME] = f"{self.cls.__module__}.{self.cls.__name__}"
         for k, (typ, value) in sorted(self.signature.items()):
+            if tuples_as_lists and is_flat_tuple_type(typ, value):
+                value = list(value)
 
             if Lazy.is_lazy_type(typ):
                 if recursive:
@@ -240,13 +243,14 @@ class Lazy(Generic[T, P], Serializable):
             elif isinstance(v, dict):
                 signature[k] = Lazy.from_dict(v)
             else:
+                # We store tuples as lists in json/yaml. Here we convert them back.
+                if isinstance(v, list):
+                    v = tuple(v)
                 signature[k] = v
-
         return Lazy.from_class(cls, **signature)
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args, "Please pass named parameters only."
-
         kwargs2 = self.to_dict(recursive=False)
         kwargs = {**kwargs2, **kwargs}
         kwargs = {k: v for k, v in kwargs.items() if not isinstance(v, MissingType)}

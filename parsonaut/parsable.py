@@ -58,11 +58,13 @@ class Parsable(Serializable, metaclass=ParsableMeta):
         with_class_tag: bool = False,
         with_class_tag_as_str: bool = False,
         flatten: bool = False,
+        tuples_as_lists: bool = False,
     ):
         return self._cfg.to_dict(
             with_class_tag=with_class_tag,
             with_class_tag_as_str=with_class_tag_as_str,
             flatten=flatten,
+            tuples_as_lists=tuples_as_lists,
         )
 
     @classmethod
