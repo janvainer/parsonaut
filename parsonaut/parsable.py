@@ -88,7 +88,7 @@ class Parsable(Serializable, metaclass=ParsableMeta):
         raise NotImplementedError()
 
     @classmethod
-    def from_checkpoint(cls, pth):
+    def from_checkpoint(cls, pth, map_location=None):
         assert (
             torch is not None
         ), f"Loading {cls} from checkpoint requires torch installed."
@@ -97,7 +97,7 @@ class Parsable(Serializable, metaclass=ParsableMeta):
         obj = cls.from_file(f"{pth}/config.yaml").to_eager()
 
         with open_best(f"{pth}/weights.pt", "rb") as f:
-            state_dict = torch.load(f)
+            state_dict = torch.load(f, map_location=map_location)
         obj.load_state_dict(state_dict)
         return obj
 
