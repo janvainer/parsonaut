@@ -247,7 +247,11 @@ class Lazy(Generic[T, P], Serializable):
                 if isinstance(v, list):
                     v = tuple(v)
                 signature[k] = v
-        return Lazy.from_class(cls, **signature)
+
+        # Note: Allow loading dict that can be missing non-parsable parameters.
+        #    Such a dict is created eg when usign Parsable.to_checkpoint() --> we only export parsable parameters and rest is ommited.
+        #    When we load it back, we want Lazy to fill in the non-parsable stuff with defaults from the class.
+        return Lazy.from_class(cls, **signature, skip_non_parsable=True)
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args, "Please pass named parameters only."
