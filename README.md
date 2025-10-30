@@ -76,5 +76,5 @@ Parsonaut allows configuring multiple possibly nested classes.
 Moreover, you can dynamically select which classes to use via enums.
 
 To explore more advanced features, please see the following tutorials:
-- [zero](experiments/torch_simple.py) - simple, but complete experiment
-- [hero](experiments/torch_full.py) - dynamic and nested configurations
+- [zero](examples/torch_simple.py) - simple, but complete experiment
+- [hero](examples/torch_full.py) - dynamic and nested configurations
