@@ -279,16 +279,6 @@ def test_Lazy_skips_nonparsable_without_defaults():
     assert "a" not in s.signature
 
 
-def test_Lazy_fails_if_provided_with_non_parsable_default():
-    class DummyFlat(Lazy):
-        def __init__(self, a: list[str] = [1]):  # type: ignore
-            pass
-
-    with pytest.raises(AssertionError):
-        with typecheck_eager():
-            Lazy.from_class(DummyFlat)
-
-
 def test_Lazy_fails_if_provided_with_inconsistent_annotation():
     class DummyFlat(Lazy):
         def __init__(self, a: str = 1):  # type: ignore
@@ -366,22 +356,6 @@ def test_Parsable_init_options(obj):
     assert obj.b == "hello" == obj._cfg.b
     assert obj.c == 3.14 == obj._cfg.c
     assert obj._cfg.cls == DummyFlat
-
-
-def test_Parsable_as_lazy_raises_for_non_parsable_args_in_eager_mode():
-
-    # for non-parsable without type
-    with typecheck_eager():
-        with pytest.raises(AssertionError):
-            DummyFlat.as_lazy(a=5)
-
-        # for non-parsable with type
-        class DummyNonParsable(Parsable):
-            def __init__(self, a: list[int]) -> None:
-                pass
-
-        with pytest.raises(AssertionError):
-            DummyNonParsable.as_lazy(a=[5])
 
 
 def test_Parsable_to_dict():

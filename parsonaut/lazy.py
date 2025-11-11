@@ -92,14 +92,10 @@ class Lazy(Generic[T, P], Serializable):
             return False
 
     @staticmethod
-    def from_class(
-        cl: Type[B] | Callable[A, B], *args, skip_non_parsable: bool = False, **kwargs
-    ) -> "Lazy[B, A]":
+    def from_class(cl: Type[B] | Callable[A, B], *args, **kwargs) -> "Lazy[B, A]":
 
         if should_typecheck_eagerly():
-            sig = Lazy.get_signature(
-                cl, *args, skip_non_parsable=skip_non_parsable, **kwargs
-            )
+            sig = Lazy.get_signature(cl, *args, **kwargs)
             return Lazy(cl, sig)
         else:
             return Lazy(
@@ -108,15 +104,12 @@ class Lazy(Generic[T, P], Serializable):
                     Lazy.get_signature,
                     cl,
                     *args,
-                    skip_non_parsable=skip_non_parsable,
                     **kwargs,
                 ),
             )
 
     @staticmethod
-    def get_signature(
-        cl, *args, skip_non_parsable: bool = False, **kwargs
-    ) -> Mapping[str, KeyTypes]:
+    def get_signature(cl, *args, **kwargs) -> Mapping[str, KeyTypes]:
         from .parsable import Parsable  # needed for some asserts
 
         func = cl.__init__
@@ -151,16 +144,9 @@ class Lazy(Generic[T, P], Serializable):
 
             # Skip variables without type annotation - the user can fill them in with to_eager() call
             if typ == MissingType:
-                if not skip_non_parsable:
-                    assert value is Missing
                 continue
 
-            # skip non-parsable - the user can fill them in with to_eager() call
             if not is_parsable_type(typ):
-                if not skip_non_parsable:
-                    assert (
-                        value is Missing
-                    ), f"Cannot initialize Lazy[{cl.__name__}, ...] with variable {name=} and non-parsable type={typ}."
                 continue
 
             # check if the provided value is parsable and matches the annotation
@@ -177,13 +163,48 @@ class Lazy(Generic[T, P], Serializable):
         if fields is None:
             return Lazy.from_dict(dct)
 
-        for field, new_val in fields.items():
-            assert (
-                "._class" not in field and "_class" not in field
-            ), "Cannot change class."
-            assert field in dct, f"Attempted to copy with {field=} that is not present."
+        fields = flatten_dict(fields)
 
-            dct[field] = new_val
+        # Ensure we iterate over class types first (if present)
+        fields = dict(
+            sorted(
+                fields.items(),
+                key=lambda item: (not item[0].endswith(f".{TYPE_NAME}"), item[0]),
+            )
+        )
+        for field, new_val in fields.items():
+            # We are attempting to change subclass
+            if field.endswith(TYPE_NAME) and dct[field] != new_val:
+                prefix = field.removesuffix(TYPE_NAME)
+                old_class_fields = {k for k in list(dct.keys()) if k.startswith(prefix)}
+                new_class_fields = Lazy.from_class(maybe_import(new_val)).to_dict(
+                    flatten=True, with_class_tag=True
+                )
+                new_class_fields = {
+                    f"{prefix}{k}": v for k, v in new_class_fields.items()
+                }
+
+                # Remove old class fields completely -> if the classes share some fields, we always use the new default values.
+                # That is, if the user does not specify the value explicitly, we use default from the new class.
+                # If the new class has the attribute missing, it will be missing too even if the old class had it.\
+
+                # Warning: The defaults are currently taken from the new class init. NOT from the Choices default!
+                for p in old_class_fields:
+                    del dct[p]
+
+                # Add new class fields if defaults are available (to not trigger assert later)
+                for k, v in new_class_fields.items():
+                    if k not in dct:
+                        dct[k] = v
+
+                # Finally set the class type
+                dct[field] = new_val
+            # Simple case, where user simply changes base args
+            else:
+                assert (
+                    field in dct
+                ), f"Attempted to copy with {field=} that is not present."
+                dct[field] = new_val
 
         return Lazy.from_dict(dct)
 
@@ -251,7 +272,7 @@ class Lazy(Generic[T, P], Serializable):
         # Note: Allow loading dict that can be missing non-parsable parameters.
         #    Such a dict is created eg when usign Parsable.to_checkpoint() --> we only export parsable parameters and rest is ommited.
         #    When we load it back, we want Lazy to fill in the non-parsable stuff with defaults from the class.
-        return Lazy.from_class(cls, **signature, skip_non_parsable=True)
+        return Lazy.from_class(cls, **signature)
 
     def to_eager(self, *args: P.args, **kwargs: P.kwargs) -> T:
         assert not args, "Please pass named parameters only."

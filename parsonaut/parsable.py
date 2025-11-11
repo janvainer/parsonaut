@@ -8,7 +8,7 @@ from .serialization import Serializable, is_module_available, open_best
 class ParsableMeta(ABCMeta):
     def __call__(cls, *args, **kwargs):
 
-        cfg = Lazy.from_class(cls, *args, skip_non_parsable=True, **kwargs)
+        cfg = Lazy.from_class(cls, *args, **kwargs)
 
         # https://stackoverflow.com/a/73923070/8378586
         obj = cls.__new__(cls, *args, **kwargs)
@@ -69,7 +69,7 @@ class Parsable(Serializable, metaclass=ParsableMeta):
 
     @classmethod
     def from_dict(cls, dct) -> Lazy:
-        return Lazy.from_class(cls).from_dict(dct)
+        return Lazy.from_class(cls).copy(dct)
 
     @classmethod
     def parse_args(cls: Type[T] | Callable[P, T], *args, **kwargs) -> Lazy[T, P]:
