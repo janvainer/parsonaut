@@ -23,7 +23,7 @@ dev_requires = sorted(tests_require + ["pre-commit==3.6.2"])
 
 setup(
     name="parsonaut",
-    version="1.0.3",
+    version="1.0.4",
     url="https://github.com/janvainer/parsonaut.git",
     author="Jan Vainer",
     author_email="vainerjan@gmail.com",
