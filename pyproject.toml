@@ -1,9 +1,50 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "parsonaut"
+version = "2.0.0"
+description = "Auto-configure (not only) torch experiments from the CLI."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE.txt" }
+authors = [{ name = "Jan Vainer", email = "vainerjan@gmail.com" }]
+dependencies = ["PyYAML>=6,<7"]
+
+[project.urls]
+Homepage = "https://github.com/janvainer/parsonaut"
+
+[project.optional-dependencies]
+tests = [
+    "pytest>=8",
+    "pytest-cov>=4",
+    "torch",
+]
+dev = ["parsonaut[tests]", "pre-commit>=3.6", "ruff>=0.6"]
+
+[tool.setuptools]
+packages = ["parsonaut"]
+
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "-ra -q --doctest-modules"
+addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
 
-[tool.isort]
-profile = "black"
+[tool.ruff]
+# Matches the formatter, which is what decides the line length in practice.
+line-length = 88
+# Documentation snippets are written to be read, not to be PEP 8: the formatter
+# would pad them with blank lines and undo the aligned trailing comments.
+extend-exclude = ["env", "*.md"]
+
+[tool.ruff.lint]
+# What flake8 checked, plus the import sorting isort used to do. Line length
+# is left to the formatter, as `extend-ignore = E501` used to say.
+select = ["E4", "E7", "E9", "F", "I", "C90"]
+
+[tool.ruff.lint.mccabe]
+# Carried over from the flake8 config this replaced.
+max-complexity = 10

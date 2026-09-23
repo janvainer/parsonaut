@@ -6,46 +6,32 @@ import pytest
 from parsonaut.typecheck import (
     BASIC_TYPES,
     get_flat_tuple_inner_type,
-    is_bool_type,
+    is_basic_type,
     is_flat_tuple_type,
-    is_float_type,
-    is_int_type,
-    is_optional_single_type,
     is_parsable_type,
-    is_str_type,
+    optional_inner_type,
 )
 
 
-def test_is_float_type():
-    assert is_float_type(float)
-    assert is_float_type(float, 1.0)
-
-    assert not is_float_type(int)
-    assert not is_float_type(float, 1)
+@pytest.mark.parametrize("typ", BASIC_TYPES)
+def test_is_basic_type_accepts_its_own_values(typ):
+    assert is_basic_type(typ)
+    assert is_basic_type(typ, typ())
 
 
-def test_is_int_type():
-    assert is_int_type(int)
-    assert is_int_type(int, 1)
-    assert is_int_type(int, True)  # isinstance(True, int) == True
-
-    assert not is_int_type(float)
-    assert not is_int_type(int, 1.0)
-
-
-def test_is_bool_type():
-    assert is_bool_type(bool)
-    assert is_bool_type(bool, True)
-    assert not is_bool_type(bool, 0)
-    assert not is_bool_type(bool, 1)
-    assert not is_bool_type(int)
+def test_is_basic_type_rejects_other_types_and_values():
+    assert not is_basic_type(list)
+    assert not is_basic_type(tuple[int, ...])
+    assert not is_basic_type(float, 1)
+    assert not is_basic_type(str, 1)
+    assert not is_basic_type(int, 1.0)
 
 
-def test_is_str_type():
-    assert is_str_type(str)
-    assert is_str_type(str, "hello")
-    assert not is_str_type(int)
-    assert not is_str_type(str, 1)
+def test_is_basic_type_does_not_take_a_bool_for_an_int():
+    # A bool is not accepted as an int, even though isinstance(True, int) is.
+    assert is_basic_type(bool, True)
+    assert not is_basic_type(int, True)
+    assert not is_basic_type(bool, 1)
 
 
 @pytest.mark.parametrize(
@@ -68,7 +54,7 @@ def test_is_flat_tuple_type_accepts_base_types(
 
 @pytest.mark.parametrize(
     ("typ1", "typ2"),
-    combinations(BASIC_TYPES, 2),
+    list(combinations(BASIC_TYPES, 2)),
 )
 def test_is_flat_tuple_type_rejects_mixed_types(typ1, typ2):
     assert not is_flat_tuple_type(tuple[typ1, typ2])
@@ -76,6 +62,9 @@ def test_is_flat_tuple_type_rejects_mixed_types(typ1, typ2):
 
 def test_is_flat_tuple_type_rejects_empty_tuple():
     assert not is_flat_tuple_type(tuple)
+    # `tuple[()]` has a tuple origin but no arguments to inspect.
+    assert not is_flat_tuple_type(tuple[()])
+    assert not is_flat_tuple_type(tuple[()], ())
 
 
 def test_is_flat_tuple_type_rejects_non_tuple():
@@ -85,6 +74,12 @@ def test_is_flat_tuple_type_rejects_non_tuple():
 
 def test_is_flat_tuple_type_rejects_nested_tuple():
     assert not is_flat_tuple_type(tuple[tuple[int, int, int]])
+
+
+def test_is_flat_tuple_type_rejects_bools_for_int():
+    # Same asymmetry as is_basic_type: a bool must not pass as an int.
+    assert not is_flat_tuple_type(tuple[int, ...], (True, False))
+    assert is_flat_tuple_type(tuple[bool, ...], (True, False))
 
 
 def test_is_flat_tuple_type_rejects_mismatched_values():
@@ -101,25 +96,16 @@ def test_get_flat_tuple_inner_type_accepted_cases():
     assert get_flat_tuple_inner_type(tuple[int, int, int]) == (int, 3)
     assert get_flat_tuple_inner_type(tuple[int, ...]) == (int, -1)
 
-    assert get_flat_tuple_inner_type(tuple[tuple[int], ...]) == (tuple[int], -1)
-    assert get_flat_tuple_inner_type(tuple[tuple[int, ...], ...]) == (
-        tuple[int, ...],
-        -1,
-    )
-    assert get_flat_tuple_inner_type(tuple[tuple[int, int], ...]) == (
-        tuple[int, int],
-        -1,
-    )
-
 
 def test_get_flat_tuple_inner_type_raises_on_invalid_cases():
-    with pytest.raises(AssertionError):
+    with pytest.raises(TypeError, match="at least one inner type"):
         get_flat_tuple_inner_type(tuple)
 
-    with pytest.raises(AssertionError):
-        get_flat_tuple_inner_type(tuple[tuple])
+    # A tuple of tuples is not flat, so `is_flat_tuple_type` never offers one.
+    with pytest.raises(TypeError, match="inner type"):
+        get_flat_tuple_inner_type(tuple[tuple[int, int], ...])
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(TypeError, match="all inner types must be the same"):
         get_flat_tuple_inner_type(tuple[str, int])
 
 
@@ -135,18 +121,36 @@ def test_is_parsable_type_accepts(typ):
 
 
 @pytest.mark.parametrize(
-    "typ, value, expected",
+    "typ, expected",
     [
-        (int | None, None, (True, int)),
-        (int | None, 5, (True, int)),
-        (int | None, "hi", (False, int)),
-        (Optional[str], "hello", (True, str)),
-        (Optional[str], None, (True, str)),
-        (Optional[str], 123, (False, str)),
-        (int, 42, (False, int)),
-        (Union[int, str], "hello", (False, Union[int, str])),
-        (Union[int, None, str], None, (False, Union[int, None, str])),
+        (int | None, (True, int)),
+        (Optional[str], (True, str)),
+        (tuple[int, ...] | None, (True, tuple[int, ...])),
+        (int, (False, int)),
+        # More than one member left over, so there is no single inner type.
+        (Union[int, str], (False, Union[int, str])),
+        (Union[int, None, str], (False, Union[int, None, str])),
     ],
 )
-def test_is_optional_single_type(typ, value, expected):
-    assert is_optional_single_type(typ, value) == expected
+def test_optional_inner_type(typ, expected):
+    assert optional_inner_type(typ) == expected
+
+
+@pytest.mark.parametrize(
+    "typ, value, expected",
+    [
+        (int | None, None, True),
+        (int | None, 5, True),
+        (int | None, "hi", False),
+        (Optional[str], None, True),
+        (Optional[str], 123, False),
+        (int, 42, True),
+        # None is only a value for an optional annotation.
+        (int, None, False),
+        (tuple[int, ...] | None, (1, 2), True),
+        (tuple[int, ...] | None, (1, "x"), False),
+        (Union[int, str], "hello", False),
+    ],
+)
+def test_is_parsable_type_checks_values_against_optionals(typ, value, expected):
+    assert is_parsable_type(typ, value) is expected

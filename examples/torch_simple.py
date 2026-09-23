@@ -1,34 +1,25 @@
 """
-We showcase how to configure a simple experiment:
+Configure a torch experiment from the CLI: model, optimizer, and schedule.
 
-    1. Define a torch Model
-    2. Define an optimizer
-    3. Configure both in a single CLI
+Every script also accepts `--config params.yaml` to read the defaults from a
+file; anything passed on the command line still wins.
 
-usage: torch_simple.py [-h] [--model.in_channels int] [--model.out_channels int] [--opt.dampening float] [--opt.lr float] [--opt.momentum float]
-                       [--opt.nesterov bool] [--opt.weight_decay float]
-
-options:
-  -h, --help            show this help message and exit
-  --model.in_channels int
-  --model.out_channels int
-  --opt.dampening float
-  --opt.lr float
-  --opt.momentum float
-  --opt.nesterov bool
-  --opt.weight_decay float
+usage: torch_simple.py [-h] [--config path] [--model.in_channels int] [--model.out_channels int]
+                       [--opt.dampening float] [--opt.lr float] [--opt.momentum float]
+                       [--opt.nesterov bool] [--opt.weight_decay float] [--schedule.gamma float]
 """
 
 from dataclasses import dataclass
 
 import torch.nn as nn
 from torch.optim import SGD as SGD_
+from torch.optim.lr_scheduler import ExponentialLR as ExponentialLR_
 
-from parsonaut import Lazy, Parsable
+from parsonaut import Parsable
 
 
-# Use CheckpointMixin for torch classes that
-# expose the state_dict API
+# Subclass Parsable to make a class configurable. For torch classes that expose
+# the state_dict API you also get checkpointing for free.
 class Model(nn.Module, Parsable):
     def __init__(
         self,
@@ -60,14 +51,20 @@ class SGD(SGD_, Parsable):
         )
 
 
-# Non-torch objects can use Parsable instead
+class ExponentialLR(ExponentialLR_, Parsable):
+    def __init__(self, optimizer, gamma: float = 0.9):
+        super().__init__(optimizer=optimizer, gamma=gamma)
+
+
 @dataclass
 class Params(Parsable):
-    # Calling as_lazy is like doing a nested partial of the class __init__ function
-    model: Lazy[Model, ...] = Model.as_lazy()
-    opt: Lazy[SGD, ...] = SGD.as_lazy(
+    # Annotate a nested config with the class itself. `as_lazy` is like a
+    # nested partial init: it remembers the arguments without building anything.
+    model: Model = Model.as_lazy()
+    opt: SGD = SGD.as_lazy(
         lr=1.0,  # we can override some defaults here
     )
+    schedule: ExponentialLR = ExponentialLR.as_lazy()
 
 
 hp = Params.parse_args()  # expose all params on CLI
@@ -86,6 +83,11 @@ opt = hp.opt.to_eager(params=model.parameters())
 
 print("\nOptimizer: \n")
 print(opt)
+
+schedule = hp.schedule.to_eager(optimizer=opt)
+
+print("\nSchedule: \n")
+print(f"{type(schedule).__name__}(gamma={schedule.gamma})")
 
 # We can now do model training etc...
 # Finally, we can call model.to_checkpoint and opt.to_checkpoint
