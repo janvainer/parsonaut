@@ -496,6 +496,24 @@ def typecheck_eager(eager: bool = True):
         _TYPECHECK_EAGER.reset(token)
 
 
+def _resolve_annotation(annotation: Any, func: Callable) -> Any:
+    """Turn a postponed annotation string into the type it names.
+
+    `from __future__ import annotations` stores every annotation as text.
+    The grammar only matches real types, so a string would drop the parameter.
+    A name that cannot be resolved is left as text and stays unconfigurable.
+    """
+    if not isinstance(annotation, str):
+        return annotation
+    globalns = getattr(func, "__globals__", None)
+    if globalns is None:
+        return annotation
+    try:
+        return eval(annotation, globalns)
+    except Exception:
+        return annotation
+
+
 def _bind(
     func: Callable, args: tuple, kwargs: dict
 ) -> tuple[dict[str, tuple[Type, Any]], set[str], dict[str, Any]]:
@@ -525,6 +543,8 @@ def _bind(
         annotation = (
             param.annotation if param.annotation is not Parameter.empty else MissingType
         )
+        if annotation is not MissingType:
+            annotation = _resolve_annotation(annotation, func)
         ret[param_name] = (annotation, value)
 
     extras = {name: bound.arguments[name] for name in explicit & var_names}

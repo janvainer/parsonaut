@@ -79,19 +79,41 @@ def test_binding_nested():
     }
 
 
-def test_a_quoted_annotation_is_not_resolved():
-    # A quoted annotation stays text. It is not an accepted type, so the
-    # parameter is not configurable. The annotation beside it still is.
+def test_a_quoted_annotation_is_resolved():
     def dummy_func(a: "int" = 1, b: int = 2):
         pass
 
-    assert bound(dummy_func) == {"a": ("int", 1), "b": (int, 2)}
+    assert bound(dummy_func) == {"a": (int, 1), "b": (int, 2)}
 
     class Dummy(Parsable):
         def __init__(self, a: "int" = 1, b: int = 2):
             pass
 
-    assert Lazy.from_class(Dummy).signature == {"b": (int, 2)}
+    assert Lazy.from_class(Dummy).signature == {"a": (int, 1), "b": (int, 2)}
+
+
+def test_postponed_annotations_are_resolved():
+    namespace: dict = {}
+    exec(
+        "from __future__ import annotations\n"
+        "from parsonaut import Parsable\n"
+        "class Model(Parsable):\n"
+        "    def __init__(\n"
+        "        self, n: int = 4, name: str = 'a', flag: bool | None = None,\n"
+        "        ghost: NoSuchType = 3,\n"
+        "    ):\n"
+        "        pass\n",
+        namespace,
+    )
+
+    model = namespace["Model"]
+    # A name that does not exist stays text. The parameters beside it are read.
+    assert bound(model.__init__)["ghost"] == ("NoSuchType", 3)
+    assert model.as_lazy().signature == {
+        "n": (int, 4),
+        "name": (str, "a"),
+        "flag": (bool | None, None),
+    }
 
 
 def test_binding_skips_var_args():

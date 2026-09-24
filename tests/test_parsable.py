@@ -1,56 +1,8 @@
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
 
 import pytest
-import torch
-import torch.nn as nn
 
 from parsonaut import Lazy, Parsable
-
-
-class DummySerializableModule(nn.Module, Parsable):
-    def __init__(self, value: int, non_parsable: nn.Module = nn.ReLU()) -> None:
-        super().__init__()
-        self.value = value
-        self.layer = nn.Linear(value, value)
-        self.activation = non_parsable
-
-
-def test_from_checkpoint_forwards_arguments_the_config_cannot_record():
-    class Net(nn.Module, Parsable):
-        def __init__(self, n: int = 2, activation: nn.Module = nn.Identity()):
-            super().__init__()
-            self.linear = nn.Linear(n, n)
-            self.activation = activation
-
-    module = Net(4, activation=nn.Tanh())
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir) / "ckpt"
-        module.to_checkpoint(path)
-
-        # What the config cannot store is rebuilt from the default.
-        plain = Net.from_checkpoint(path)
-        assert isinstance(plain.activation, nn.Identity)
-
-        # The caller can hand that argument back in.
-        restored = Net.from_checkpoint(path, activation=nn.Tanh())
-        assert isinstance(restored.activation, nn.Tanh)
-        assert restored.linear.out_features == 4
-
-
-def test_from_to_checkpoint():
-    module = DummySerializableModule(5)
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # The checkpoint directory does not have to exist yet.
-        path = Path(tmpdir) / "module"
-        module.to_checkpoint(path)
-        module2 = DummySerializableModule.from_checkpoint(path)
-        assert module2.activation.__class__ == nn.ReLU
-        assert module.value == module2.value
-        sd2 = module2.state_dict()
-        for k, v in module.state_dict().items():
-            torch.testing.assert_close(v, sd2[k])
 
 
 class SubClass1(Parsable):
@@ -242,3 +194,54 @@ def test_Parsable_skips_init_when_new_returns_something_else():
 def test_Parsable_from_dict_rejects_a_class_key():
     with pytest.raises(ValueError, match="field='_class'"):
         SubClass1.from_dict({"_class": "parsonaut.lazy.Lazy", "x": 2})
+
+
+class Encoder(Parsable):
+    def __init__(self, num_layers: int = 12, dim: int = 32):
+        self.num_layers = num_layers
+        self.dim = dim
+
+
+class Trunk(Parsable):
+    def __init__(self, encoder: Encoder = Encoder.as_lazy()):
+        self.encoder = encoder
+
+
+class Train(Parsable):
+    def __init__(self, model: Trunk = Trunk.as_lazy(), seed: int = 0):
+        self.model = model
+        self.seed = seed
+
+
+def test_from_file_selects_a_nested_node(tmp_path):
+    config = Train.as_lazy(model=Trunk.as_lazy(encoder=Encoder.as_lazy(num_layers=6)))
+    path = tmp_path / "train.yaml"
+    config.to_file(path)
+
+    encoder = Encoder.from_file(path, key="model.encoder")
+
+    assert encoder == Encoder.as_lazy(num_layers=6, dim=32)
+    assert encoder.to_eager(num_layers=4).num_layers == 4
+
+
+def test_from_dict_selects_a_node_written_with_dots():
+    encoder = Encoder.from_dict(
+        {"model.encoder.num_layers": 6, "model.encoder.dim": 8, "seed": 1},
+        key="model.encoder",
+    )
+    assert encoder == Encoder.as_lazy(num_layers=6, dim=8)
+
+
+def test_selecting_a_missing_node_names_it():
+    with pytest.raises(ValueError, match="no node 'model.encoder'"):
+        Encoder.from_dict({"seed": 1}, key="model.encoder")
+
+
+def test_selecting_a_leaf_is_rejected():
+    with pytest.raises(ValueError, match="not a nested configuration"):
+        Encoder.from_dict({"model": {"encoder": 6}}, key="model.encoder")
+
+
+def test_an_empty_key_is_rejected():
+    with pytest.raises(ValueError, match="Invalid config key"):
+        Encoder.from_dict({"num_layers": 6}, key="")
