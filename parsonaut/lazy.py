@@ -16,17 +16,13 @@ from typing import (
 )
 
 from .dicts import flatten_dict, unflatten_dict
-from .serialization import TYPE_NAME, Serializable, maybe_import
+from .serialization import Serializable
 from .typecheck import (
     Missing,
     MissingType,
-    coerce_bool,
-    get_union_members,
-    is_flat_tuple_type,
-    is_parsable_type,
+    Node,
+    classify,
     is_union_type,
-    optional_inner_type,
-    union_allows_none,
 )
 
 T = TypeVar("T")
@@ -62,7 +58,6 @@ class Field:
 
     typ: Any
     default: Any
-    nested: bool
 
 
 def schema_of(cl) -> dict[str, Field]:
@@ -98,14 +93,18 @@ def _build_schema(cl) -> dict[str, Field]:
 
 
 def _try_field(cl, name: str, typ, value, *, provided: bool) -> Field | None:
-    _reject_nested_union(_where(cl), name, typ)
-    nested_cls = nested_class(typ)
-    if nested_cls is not None or isinstance(value, Lazy):
+    try:
+        form = classify(typ)
+    except TypeError as exc:
+        raise TypeError(f"{_where(cl)}: {exc} ({name}: {_type_name(typ)}).") from exc
+
+    if (isinstance(form, Node) and form.cls is not None) or isinstance(value, Lazy):
+        nested_cls = form.cls if isinstance(form, Node) else None
         typ, value = _resolve_nested(cl, name, typ, nested_cls, value)
         _reject_reserved_name(cl, name)
-        return Field(typ, value, nested=True)
+        return Field(typ, value)
 
-    if typ is MissingType or not is_parsable_type(typ):
+    if typ is MissingType or form is None:
         reason = (
             "it has no type annotation"
             if typ is MissingType
@@ -119,14 +118,13 @@ def _try_field(cl, name: str, typ, value, *, provided: bool) -> Field | None:
             )
         return None
 
-    value = _coerce(typ, value)
-    if not (value is Missing or is_parsable_type(typ, value)):
+    if not form.accepts(value):
         raise TypeError(
             f"Provided value {name}={value!r} does not match "
             f"the provided annotation {name}: {_type_name(typ)}"
         )
     _reject_reserved_name(cl, name)
-    return Field(typ, value, nested=False)
+    return Field(typ, value)
 
 
 class Lazy(Generic[T], Serializable):
@@ -156,7 +154,7 @@ class Lazy(Generic[T], Serializable):
         return self._identity() == other._identity()
 
     def __str__(self):
-        return _lazy_str(self.to_dict(class_tag=True))
+        return _lazy_str(self)
 
     def __repr__(self):
         try:
@@ -201,65 +199,34 @@ class Lazy(Generic[T], Serializable):
     def get_signature(cl, /, *args, **kwargs) -> Signature:
         return _build_signature(cl, args, kwargs)
 
-    def copy(
-        self: "Lazy[B]",
-        fields: dict | None = None,
-        allowed: tuple[type, ...] = (),
-    ) -> "Lazy[B]":
+    def copy(self: "Lazy[B]", fields: dict | None = None) -> "Lazy[B]":
         """This configuration with `fields` changed.
 
-        Keys may be nested or dotted. A `_class` key may name the class
-        already at that node, or a subclass of it. `allowed` restricts which
-        subclasses are accepted.
+        Keys may be nested or dotted. Unknown keys are errors.
         """
-        updates = unflatten_dict(flatten_dict(fields)) if fields else {}
-        return apply(self, updates, allowed=allowed)
+        return apply(self, fields or {})
 
     def to_dict(
         self,
         *,
-        class_tag: bool | str = False,
         flatten: bool = False,
-        tuples_as_lists: bool = False,
         skip_missing: bool = False,
     ):
         dct = dict()
-        if class_tag:
-            dct[TYPE_NAME] = _class_tag(self.cls, class_tag)
         for k, (typ, value) in sorted(self.signature.items()):
             if value is Missing and skip_missing:
                 continue
 
-            if is_nested_type(typ):
-                dct[k] = cast(Lazy, value).to_dict(
-                    class_tag=class_tag,
-                    tuples_as_lists=tuples_as_lists,
-                    skip_missing=skip_missing,
-                )
+            if isinstance(classify(typ), Node):
+                dct[k] = cast(Lazy, value).to_dict(skip_missing=skip_missing)
                 continue
 
-            if tuples_as_lists and value is not Missing:
-                _, inner = optional_inner_type(typ)
-                if is_flat_tuple_type(inner, value):
-                    value = list(value)
             dct[k] = value
 
         return flatten_dict(dct) if flatten else dct
 
     def _own_values(self) -> dict[str, Any]:
         return {name: value for name, (_, value) in self.signature.items()}
-
-    @classmethod
-    def from_dict(cls, dct) -> "Lazy":
-        fields = flatten_dict(dct)
-        target = fields.pop(TYPE_NAME, None)
-        if target is None:
-            raise ValueError(
-                f"Cannot build a Lazy from a dict without a {TYPE_NAME!r} key. "
-                f"Got keys: {sorted(fields)}. Use `SomeParsable.from_dict(...)` "
-                "if you want the class to be filled in for you."
-            )
-        return Lazy.from_class(maybe_import(target)).copy(fields)
 
     def to_eager(self, *args, **kwargs) -> T:
         if args:
@@ -281,9 +248,8 @@ class Lazy(Generic[T], Serializable):
 
 
 def new_lazy(cl, args=(), kwargs=None, *, strict: bool = True) -> Lazy:
-    # The signature is built on first use, so take a copy now. Otherwise a
-    # list handed in for a tuple field still aliases the caller's list, and a
-    # later append changes the recorded configuration.
+    # The signature is built on first use, so take a copy now. A later
+    # mutation of a list or dict the caller still holds stays outside.
     args = tuple(_snapshot(arg) for arg in args)
     kwargs = _snapshot(kwargs or {})
     if _TYPECHECK_EAGER.get():
@@ -331,19 +297,13 @@ def _build_signature(cl, args=(), kwargs=None, *, strict: bool = True) -> Signat
     return res
 
 
-def apply(
-    node: Lazy,
-    updates: dict,
-    source: str | None = None,
-    allowed: tuple[type, ...] = (),
-) -> Lazy:
+def apply(node: Lazy, updates: dict, source: str | None = None) -> Lazy:
     """Return `node` with `updates` applied.
 
-    Keys may be nested or dotted. A `_class` key may name the class already
-    at that node, or a subclass of it. Unknown keys are errors.
+    Keys may be nested or dotted. Unknown keys are errors.
     """
     try:
-        return _apply(node, unflatten_dict(flatten_dict(updates)), "", allowed)
+        return _apply(node, unflatten_dict(flatten_dict(updates)), "")
     except (TypeError, ValueError) as exc:
         if source is None:
             raise
@@ -351,17 +311,7 @@ def apply(
         raise type(exc)(f"{source}: {message}") from exc
 
 
-def _apply(
-    node: Lazy, updates: dict, path: str, allowed: tuple[type, ...] = ()
-) -> Lazy:
-    updates = dict(updates)
-
-    tag = updates.pop(TYPE_NAME, None)
-    if tag is not None:
-        new_class = maybe_import(tag)
-        if new_class is not node.cls:
-            node = _switch_class(node, new_class, path, allowed)
-
+def _apply(node: Lazy, updates: dict, path: str) -> Lazy:
     signature = node.signature
     for key in updates:
         if key not in signature:
@@ -372,69 +322,32 @@ def _apply(
     rebuilt = {}
     for key, (typ, value) in signature.items():
         if key in updates:
-            value = _updated_value(f"{path}{key}", typ, value, updates[key], allowed)
+            value = _updated_value(f"{path}{key}", typ, value, updates[key])
         elif isinstance(value, Lazy):
-            value = _apply(value, {}, f"{path}{key}.", allowed)
+            value = _apply(value, {}, f"{path}{key}.")
         rebuilt[key] = (typ, value)
 
     return Lazy(node.cls, rebuilt)
 
 
-def _switch_class(node: Lazy, new_class, path: str, allowed: tuple[type, ...]) -> Lazy:
-    """`node` rebuilt as `new_class`.
-
-    A value is carried over only when it differs from the previous class's
-    default. Everything else takes the new class's default, so switching
-    does not pin the old defaults onto the subclass.
-    """
-    where = path.rstrip(".") or "the configuration"
-    if allowed and not _matches(new_class, allowed):
-        raise TypeError(
-            f"Cannot switch {where} to {_type_name(new_class)}, which is "
-            f"not one of {', '.join(_type_name(a) for a in allowed)}."
-        )
-    if not _is_subclass(new_class, node.cls):
-        raise TypeError(
-            f"Cannot switch {where} to {_type_name(new_class)}: "
-            f"it is {_type_name(node.cls)}."
-        )
-
-    fresh = Lazy.from_class(new_class)
-    previous = node.signature
-    previous_defaults = {
-        name: value for name, (_, value) in Lazy.from_class(node.cls).signature.items()
-    }
-    signature = {}
-    for name, (typ, value) in fresh.signature.items():
-        if name in previous:
-            old_typ, old_value = previous[name]
-            if (
-                old_typ == typ
-                and old_value is not Missing
-                and old_value != previous_defaults.get(name, Missing)
-            ):
-                value = old_value
-        signature[name] = (typ, value)
-    return Lazy(new_class, signature)
-
-
-def _updated_value(where: str, typ, current, update, allowed=()):
+def _updated_value(where: str, typ, current, update):
     if isinstance(update, dict):
         if not isinstance(current, Lazy):
             raise TypeError(
                 f"Attempted to copy {where} with a dict of fields, but it is "
                 "not a nested configuration."
             )
-        return _apply(current, update, f"{where}.", allowed)
+        return _apply(current, update, f"{where}.")
 
-    if is_nested_type(typ):
+    form = classify(typ)
+    if isinstance(form, Node):
         config = _as_config(update)
         if not isinstance(config, Lazy):
             raise TypeError(
                 f"Attempted to copy {where} with {update!r}, which is not a "
                 "configuration."
             )
-        expected = nested_class(typ)
+        expected = form.cls
         if (
             expected is not None
             and config.cls is not expected
@@ -446,8 +359,7 @@ def _updated_value(where: str, typ, current, update, allowed=()):
             )
         return config
 
-    update = _coerce(typ, update)
-    if not (update is Missing or is_parsable_type(typ, update)):
+    if form is None or not form.accepts(update):
         raise TypeError(
             f"Provided value {where}={update!r} does not match "
             f"the provided annotation {where}: {_type_name(typ)}"
@@ -463,68 +375,9 @@ def _as_config(value):
     return value
 
 
-def _coerce(typ, value):
-    if value is Missing or value is None or isinstance(value, bool):
-        return value
-
-    _, typ = optional_inner_type(typ)
-    if typ is bool:
-        return coerce_bool(value)
-    if typ is float and isinstance(value, int):
-        return float(value)
-
-    if isinstance(value, list) and is_flat_tuple_type(typ):
-        value = tuple(value)
-
-    args = get_args(typ)
-    if isinstance(value, tuple) and args and args[0] is float:
-        return tuple(
-            (
-                float(item)
-                if isinstance(item, int) and not isinstance(item, bool)
-                else item
-            )
-            for item in value
-        )
-    if isinstance(value, tuple) and args and args[0] is bool:
-        return tuple(coerce_bool(item) for item in value)
-    return value
-
-
 def is_nested_type(typ) -> bool:
     """Is `typ` an annotation for a nested (lazily built) config?"""
-    if _is_subclass(typ, Lazy) or get_origin(typ) is Lazy:
-        return True
-    return nested_class(typ) is not None
-
-
-def nested_class(typ) -> type | None:
-    """The single class a nested annotation names, or `None` if it is a leaf."""
-    if get_origin(typ) is Lazy:
-        args = get_args(typ)
-        return args[0] if args and _is_class(args[0]) else None
-
-    if _is_subclass(typ, _parsable_base()):
-        return typ
-    return None
-
-
-def _looks_nested(typ) -> bool:
-    return get_origin(typ) is Lazy or _is_subclass(typ, _parsable_base())
-
-
-def _reject_nested_union(where: str, name: str, typ) -> None:
-    if not is_union_type(typ):
-        return
-    members = get_union_members(typ)
-    if not any(_looks_nested(m) for m in members):
-        return
-    kind = (
-        "optional nested configs"
-        if union_allows_none(typ)
-        else "unions of nested configs"
-    )
-    raise TypeError(f"{where}: {kind} are not supported ({name}: {_type_name(typ)}).")
+    return isinstance(classify(typ), Node)
 
 
 def _is_class(typ) -> bool:
@@ -533,10 +386,6 @@ def _is_class(typ) -> bool:
 
 def _is_subclass(typ, base: type) -> bool:
     return _is_class(typ) and issubclass(typ, base)
-
-
-def _matches(cls, allowed: tuple[type, ...]) -> bool:
-    return any(_is_class(a) and _is_subclass(cls, a) for a in allowed)
 
 
 def _resolve_nested(cl, name: str, typ, nested_cls: type | None, value):
@@ -600,12 +449,6 @@ def _where(cl) -> str:
     return f"{_type_name(cl)}.__init__" if isinstance(cl, type) else _type_name(cl)
 
 
-def _class_tag(cls, form: bool | str):
-    if form == "str":
-        return f"{cls.__module__}.{cls.__name__}"
-    return cls
-
-
 def _type_name(typ) -> str:
     if is_union_type(typ) or get_origin(typ) is not None:
         return str(typ)
@@ -656,14 +499,7 @@ def typecheck_eager(eager: bool = True):
 def _bind(
     func: Callable, args: tuple, kwargs: dict
 ) -> tuple[dict[str, tuple[Type, Any]], set[str], dict[str, Any]]:
-    try:
-        sig = signature(func, eval_str=True)
-    except NameError as exc:
-        raise NameError(
-            f"Could not resolve the type annotations of {func!r}: {exc}. "
-            "Parsonaut needs them to build the configuration."
-        ) from exc
-
+    sig = signature(func)
     first, *_ = [*sig.parameters, None]
     if first == "self":
         bound = sig.bind_partial(None, *args, **kwargs)
@@ -708,21 +544,18 @@ def _unrecordable_extras(extras: dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _lazy_str(dct: dict, level: int = 1):
+def _lazy_str(node: Lazy, level: int = 1):
 
     def format_attr(k, v):
         return f"{k}={v!r}" if isinstance(v, str) else f"{k}={v}"
 
-    header = _type_name(dct[TYPE_NAME])
-    attrs = [
-        (
-            f"{k}={_lazy_str(v, level=level + 1)}"
-            if isinstance(v, dict)
-            else format_attr(k, v)
-        )
-        for k, v in dct.items()
-        if k != TYPE_NAME
-    ]
+    header = _type_name(node.cls)
+    attrs = []
+    for k, (_, value) in sorted(node.signature.items()):
+        if isinstance(value, Lazy):
+            attrs.append(f"{k}={_lazy_str(value, level=level + 1)}")
+        else:
+            attrs.append(format_attr(k, value))
     if not attrs:
         return f"{header}()"
     indent = "    "

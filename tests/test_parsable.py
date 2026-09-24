@@ -59,12 +59,6 @@ class SubClass1(Parsable):
         self.y = y
 
 
-class SubClass2(SubClass1):
-    def __init__(self, x: int, z: str = "default"):
-        self.x = x
-        self.z = z
-
-
 class Experiment(Parsable):
     def __init__(
         self,
@@ -245,9 +239,6 @@ def test_Parsable_skips_init_when_new_returns_something_else():
     assert Foreign() == "not a Foreign"
 
 
-def test_Parsable_from_dict_rejects_an_unrelated_class():
-    with pytest.raises(TypeError, match="not one of SubClass1"):
-        SubClass1.from_dict({"_class": "parsonaut.lazy.Lazy"})
-
-    # A subclass is a legitimate specialisation.
-    assert SubClass1.from_dict({"_class": SubClass2, "x": 2}).as_lazy().cls is SubClass2
+def test_Parsable_from_dict_rejects_a_class_key():
+    with pytest.raises(ValueError, match="field='_class'"):
+        SubClass1.from_dict({"_class": "parsonaut.lazy.Lazy", "x": 2})

@@ -3,7 +3,7 @@ import pickle
 import subprocess
 import sys
 from dataclasses import dataclass
-from types import ModuleType
+from typing import Literal
 
 import pytest
 
@@ -79,19 +79,19 @@ def test_binding_nested():
     }
 
 
-def test_binding_resolves_postponed_annotations():
-    # `from __future__ import annotations` turns every annotation into a string.
-    module = ModuleType("postponed")
-    exec(
-        "from __future__ import annotations\n"
-        "def dummy_func(a: int = 1, b: tuple[str, ...] = ('x',)): pass\n",
-        module.__dict__,
-    )
+def test_a_quoted_annotation_is_not_resolved():
+    # A quoted annotation stays text. It is not an accepted type, so the
+    # parameter is not configurable. The annotation beside it still is.
+    def dummy_func(a: "int" = 1, b: int = 2):
+        pass
 
-    assert bound(module.dummy_func) == {
-        "a": (int, 1),
-        "b": (tuple[str, ...], ("x",)),
-    }
+    assert bound(dummy_func) == {"a": ("int", 1), "b": (int, 2)}
+
+    class Dummy(Parsable):
+        def __init__(self, a: "int" = 1, b: int = 2):
+            pass
+
+    assert Lazy.from_class(Dummy).signature == {"b": (int, 2)}
 
 
 def test_binding_skips_var_args():
@@ -296,17 +296,16 @@ def test_Lazy_names_the_parameters_it_has_when_asked_for_one_it_does_not():
 
 
 def test_Lazy_from_dict_leaves_a_list_to_the_annotation():
-    dct = {"_class": f"{__name__}.DummyFlat", "b": "x", "c": [1.0, 2.0]}
+    dct = {"b": "x", "c": [1.0, 2.0]}
 
     with pytest.raises(TypeError, match="does not match the provided annotation"):
-        Lazy.from_dict(dct).signature
+        DummyFlat.from_dict(dct).signature
 
 
 def test_Lazy_configures_a_factory_function():
     cfg = Lazy.from_class(dummy_factory, width=16)
 
     assert cfg.to_eager() == "m/16"
-    assert Lazy.from_dict(cfg.to_dict(class_tag="str")).to_eager() == "m/16"
 
 
 def test_Lazy_from_class():
@@ -325,19 +324,6 @@ def test_Lazy_to_dict():
         "b": {"c": 3.14, "b": Missing},
         "c": 3.14,
     }
-    assert Lazy.from_class(DummyNested).to_dict(class_tag=True) == {
-        "_class": DummyNested,
-        "a": Missing,
-        "b": {"_class": DummyFlat, "c": 3.14, "b": Missing},
-        "c": 3.14,
-    }
-
-    assert Lazy.from_class(DummyNested).to_dict(class_tag="str") == {
-        "_class": f"{__name__}.DummyNested",
-        "a": Missing,
-        "b": {"_class": f"{__name__}.DummyFlat", "c": 3.14, "b": Missing},
-        "c": 3.14,
-    }
 
     assert Lazy.from_class(DummyNested).to_dict(flatten=True) == {
         "a": Missing,
@@ -346,31 +332,19 @@ def test_Lazy_to_dict():
         "c": 3.14,
     }
 
-    assert Lazy.from_class(DummyNested).to_dict(class_tag=True, flatten=True) == {
-        "_class": DummyNested,
-        "a": Missing,
-        "b._class": DummyFlat,
-        "b.b": Missing,
-        "b.c": 3.14,
-        "c": 3.14,
-    }
-
 
 def test_Lazy_from_dict_nested():
-    assert Lazy.from_dict(
+    assert DummyNested.from_dict(
         {
-            "_class": DummyNested,
-            "b": {"_class": DummyFlat, "c": 3.14},
+            "b": {"c": 3.14},
             "c": 3.14,
         }
     ) == Lazy.from_class(DummyNested)
 
 
 def test_Lazy_from_dict_flat():
-    assert Lazy.from_dict(
+    assert DummyNested.from_dict(
         {
-            "_class": DummyNested,
-            "b._class": DummyFlat,
             "b.c": 3.14,
             "c": 3.14,
         }
@@ -466,12 +440,6 @@ def test_Parsable_init_options(obj):
 def test_Parsable_to_dict():
     assert DummyFlat(a=5, b="hello").to_dict() == {"b": "hello", "c": 3.14}
 
-    assert DummyFlat(a=5, b="hello").to_dict(class_tag=True) == {
-        "_class": DummyFlat,
-        "b": "hello",
-        "c": 3.14,
-    }
-
     assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict() == {
         "a": "hello",
         "b": {
@@ -481,38 +449,12 @@ def test_Parsable_to_dict():
         "c": 3.14,
     }
 
-    assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict(
-        class_tag=True
-    ) == {
-        "_class": DummyNested,
-        "a": "hello",
-        "b": {
-            "_class": DummyFlat,
-            "b": "hello",
-            "c": 3.14,
-        },
-        "c": 3.14,
-    }
-
-    assert DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello")).to_dict(
-        class_tag=True, flatten=True
-    ) == {
-        "_class": DummyNested,
-        "a": "hello",
-        "b._class": DummyFlat,
-        "b.b": "hello",
-        "b.c": 3.14,
-        "c": 3.14,
-    }
-
 
 def test_Parsable_from_dict_flat():
     x = DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello"))
     y = DummyNested.from_dict(
         {
-            "_class": DummyNested,
             "a": "hello",
-            "b._class": DummyFlat,
             "b.b": "hello",
             "b.c": 3.14,
             "c": 3.14,
@@ -531,10 +473,8 @@ def test_Parsable_from_dict_nested():
     x = DummyNested(a="hello", b=DummyFlat.as_lazy(b="hello"))
     y = DummyNested.from_dict(
         {
-            "_class": DummyNested,
             "a": "hello",
             "b": {
-                "_class": DummyFlat,
                 "b": "hello",
                 "c": 3.14,
             },
@@ -686,7 +626,7 @@ def test_Lazy_copy_handles_fields_ending_in_the_class_tag():
     assert Lazy.from_class(Weird).copy({"my_class": "y"}).my_class == "y"
 
 
-def test_Lazy_to_dict_converts_nested_tuples_to_lists():
+def test_Lazy_to_dict_keeps_a_tuple():
     class Inner(Parsable):
         def __init__(self, t: tuple[int, int] = (1, 2)):
             pass
@@ -695,20 +635,20 @@ def test_Lazy_to_dict_converts_nested_tuples_to_lists():
         def __init__(self, inner: Inner = Inner.as_lazy(), t: tuple[int, int] = (3, 4)):
             pass
 
-    assert Outer.as_lazy().to_dict(tuples_as_lists=True) == {
-        "inner": {"t": [1, 2]},
-        "t": [3, 4],
+    assert Outer.as_lazy().to_dict() == {
+        "inner": {"t": (1, 2)},
+        "t": (3, 4),
     }
 
 
-def test_Lazy_to_dict_converts_optional_tuples_to_lists():
+def test_Lazy_to_dict_keeps_an_optional_tuple():
     class Opt(Parsable):
         def __init__(
             self, xs: tuple[int, ...] | None = (1, 2), ys: tuple[int, ...] | None = None
         ):
             pass
 
-    assert Opt.as_lazy().to_dict(tuples_as_lists=True) == {"xs": [1, 2], "ys": None}
+    assert Opt.as_lazy().to_dict() == {"xs": (1, 2), "ys": None}
 
 
 def test_Lazy_to_dict_can_skip_missing_values():
@@ -717,48 +657,31 @@ def test_Lazy_to_dict_can_skip_missing_values():
         "c": 3.14,
     }
 
-    dct = DummyNested.as_lazy().to_dict(class_tag=True, skip_missing=True)
-    assert Lazy.from_dict(dct) == DummyNested.as_lazy()
-
-
-def test_Lazy_to_dict_can_tag_the_class_as_an_import_path():
-    dct = DummyNested.as_lazy().to_dict(class_tag="str", skip_missing=True)
-    assert dct["_class"] == f"{__name__}.DummyNested"
-    assert Lazy.from_dict(dct) == DummyNested.as_lazy()
-
-
-def test_Lazy_from_dict_without_a_class_tag():
-    with pytest.raises(ValueError, match="without a '_class' key"):
-        Lazy.from_dict({"a": 1})
+    dct = DummyNested.as_lazy().to_dict(skip_missing=True)
+    assert DummyNested.from_dict(dct) == DummyNested.as_lazy()
 
 
 def test_Lazy_from_dict_fills_in_nested_classes_from_the_defaults():
-    config = Lazy.from_dict({"_class": DummyNested, "b": {"b": "set"}})
+    config = DummyNested.from_dict({"b": {"b": "set"}})
     assert config == DummyNested.as_lazy(b=DummyFlat.as_lazy(b="set"))
 
-    config = Lazy.from_dict({"_class": DummyNested, "b.b": "set"})
+    config = DummyNested.from_dict({"b.b": "set"})
     assert config == DummyNested.as_lazy(b=DummyFlat.as_lazy(b="set"))
 
 
 def test_Lazy_from_dict_accepts_nested_and_dotted_keys_together():
-    config = Lazy.from_dict(
-        {"_class": DummyNested, "b.b": "set", "b": {"_class": DummyFlat}}
-    )
-    assert config == DummyNested.as_lazy(b=DummyFlat.as_lazy(b="set"))
+    config = DummyNested.from_dict({"b.b": "set", "b": {"c": 2.0}})
+    assert config == DummyNested.as_lazy(b=DummyFlat.as_lazy(b="set", c=2.0))
 
 
-def test_Lazy_from_dict_keeps_a_nested_class_within_its_annotation():
-    class Other(Parsable):
-        def __init__(self, z: int = 1):
-            pass
-
-    with pytest.raises(TypeError, match="Cannot switch b to Other"):
-        Lazy.from_dict({"_class": DummyNested, "b": {"_class": Other}})
+def test_Lazy_from_dict_rejects_a_nested_class_key():
+    with pytest.raises(ValueError, match="field='b._class'"):
+        DummyNested.from_dict({"b": {"_class": "Other"}})
 
 
 def test_Lazy_from_dict_reports_an_unknown_key():
     with pytest.raises(ValueError, match="field='nope' that is not present"):
-        Lazy.from_dict({"_class": DummyFlat, "nope": 1})
+        DummyFlat.from_dict({"nope": 1})
 
 
 def test_Lazy_from_class_accepts_a_parameter_named_cl():
@@ -813,44 +736,181 @@ def test_Lazy_rejects_values_it_cannot_record():
     assert Dummy([1, 2], lr=0.5).to_dict() == {"lr": 0.5}
 
 
-def test_Lazy_widens_int_defaults_for_float_parameters():
+def test_Lazy_rejects_an_int_where_a_float_is_annotated():
     class Dummy(Parsable):
-        def __init__(self, lr: float = 1, betas: tuple[float, float] = (0, 1)):
+        def __init__(self, lr: float = 1.0, betas: tuple[float, float] = (0.0, 1.0)):
             pass
 
-    assert Lazy.from_class(Dummy).signature == {
-        "lr": (float, 1.0),
-        "betas": (tuple[float, float], (0.0, 1.0)),
-    }
-    assert Lazy.from_class(Dummy, lr=2).signature["lr"] == (float, 2.0)
+    with pytest.raises(TypeError, match="does not match"):
+        Lazy.from_class(Dummy, lr=1).signature
+    with pytest.raises(TypeError, match="does not match"):
+        Lazy.from_class(Dummy, betas=(0, 1)).signature
     with pytest.raises(TypeError, match="does not match"):
         Lazy.from_class(Dummy, lr=True).signature
 
+    class BadDefault(Parsable):
+        def __init__(self, lr: float = 1):
+            pass
 
-def test_a_list_is_recorded_as_it_was_when_it_was_passed():
+    with pytest.raises(TypeError, match="does not match"):
+        Lazy.from_class(BadDefault).signature
+
+
+def test_a_list_is_not_a_tuple():
     class WithTuple(Parsable):
         def __init__(self, xs: tuple[int, ...] = ()):
-            self.xs = tuple(xs)
+            self.xs = xs
 
-    data = [1, 2]
-    built = WithTuple(data)  # type: ignore[arg-type]
-    data.append(3)
-    assert built.xs == (1, 2)
-    assert built.to_dict()["xs"] == (1, 2)
-
-    data = [4, 5]
-    config = WithTuple.as_lazy(xs=data)
-    data.append(6)
-    assert config.xs == (4, 5)
+    with pytest.raises(TypeError, match="does not match"):
+        WithTuple.as_lazy(xs=[1, 2]).signature
 
 
-def test_Lazy_accepts_lists_where_a_tuple_is_annotated():
+def test_Lazy_records_a_literal():
+    class Run(Parsable):
+        def __init__(
+            self,
+            mode: Literal["train", "eval"] = "train",
+            scale: Literal[1.0, 2.0] = 1.0,
+        ):
+            pass
+
+    config = Run.as_lazy()
+    assert config.mode == "train"
+    assert config.copy({"scale": 2.0, "mode": "eval"}).scale == 2.0
+    with pytest.raises(TypeError, match="does not match"):
+        config.copy({"scale": 2}).signature
+
+    class Flags(Parsable):
+        def __init__(
+            self,
+            enabled: Literal[True, False] = False,
+            label: Literal["yes", "no"] = "yes",
+        ):
+            pass
+
+    assert Flags.as_lazy().copy({"enabled": False}).enabled is False
+    assert Flags.as_lazy().copy({"label": "yes"}).label == "yes"
+    with pytest.raises(TypeError, match="does not match"):
+        Flags.as_lazy().copy({"enabled": "no"}).signature
+
+
+def test_a_union_of_literals_is_one_literal():
+    class Run(Parsable):
+        def __init__(
+            self,
+            mode: Literal["train"] | Literal["eval"] = "train",
+            scale: Literal[1.0] | Literal[2.0] | None = None,
+        ):
+            self.mode = mode
+            self.scale = scale
+
+    config = Run.as_lazy(mode="eval", scale=2.0)
+    assert config.mode == "eval"
+    assert config.scale == 2.0
+    assert config.to_dict() == {"mode": "eval", "scale": 2.0}
+    assert Run(mode="eval").mode == "eval"
+
+
+def test_constructing_a_Parsable_does_not_shift_arguments_into_a_hole():
+    class Dummy(Parsable):
+        def __init__(self, unannotated=None, lr: float = 0.1):
+            self.unannotated = unannotated
+            self.lr = lr
+
+    built = Dummy(lr=0.5)
+    assert built.unannotated is None
+    assert built.lr == 0.5
+
+    class Need(Parsable):
+        def __init__(self, callback, n: int = 1):
+            self.callback = callback
+            self.n = n
+
+    with pytest.raises(TypeError):
+        Need(n=5)
+
+
+def test_constructing_a_Parsable_keeps_a_nested_instance():
+    class Child(Parsable):
+        def __init__(self, x: int = 1):
+            self.x = x
+
+    class Parent(Parsable):
+        def __init__(self, nested: Child = Child.as_lazy()):
+            self.nested = nested
+
+    child = Child(x=3)
+    parent = Parent(nested=child)
+    assert parent.nested is child
+
+
+def test_a_class_tag_cannot_change_the_class():
+    class Wider(Parsable):
+        def __init__(self, mode: Literal["a", "b", "c"] = "c"):
+            pass
+
+    class Base(Parsable):
+        def __init__(self, mode: Literal["a", "b"] = "a"):
+            pass
+
+    with pytest.raises(ValueError, match="field='_class' that is not present"):
+        Base.as_lazy(mode="b").copy({"_class": Wider})
+
+
+def test_Lazy_copy_rejects_a_different_class():
+    class Other(Parsable):
+        def __init__(self, z: int = 1):
+            pass
+
+    class Sub(DummyNested):
+        pass
+
+    with pytest.raises(ValueError, match="field='_class' that is not present"):
+        Lazy.from_class(DummyNested).copy({"_class": Other})
+    with pytest.raises(ValueError, match="field='_class' that is not present"):
+        Lazy.from_class(DummyNested).copy({"_class": Sub})
+
+    class Holder(Parsable):
+        def __init__(self, inner: DummyNested = DummyNested.as_lazy()):
+            pass
+
+    with pytest.raises(ValueError, match="field='inner._class' that is not present"):
+        Holder.as_lazy().copy({"inner._class": Sub})
+    with pytest.raises(ValueError, match="field='inner._class' that is not present"):
+        Holder().copy({"inner._class": Sub})
+
+
+def test_a_nested_config_round_trips():
+    class Inner(Parsable):
+        def __init__(self, x: int = 1, y: int = 2):
+            pass
+
+    class Outer(Parsable):
+        def __init__(self, inner: Inner = Inner.as_lazy(x=3, y=4)):
+            pass
+
+    config = Outer.as_lazy()
+    assert Outer.from_dict(config.to_dict()) == config
+
+
+def test_Lazy_rejects_a_literal_value_of_the_wrong_type():
+    class Run(Parsable):
+        def __init__(self, mode: Literal["train", "eval"] = "train"):
+            pass
+
+    with pytest.raises(TypeError, match="does not match"):
+        Run.as_lazy(mode="nope").signature
+
+
+def test_Lazy_rejects_a_list_where_a_tuple_is_annotated():
     class Dummy(Parsable):
         def __init__(self, t: tuple[int, int] = (1, 2)):
             pass
 
-    assert Lazy.from_class(Dummy, t=[3, 4]).t == (3, 4)
-    assert Lazy.from_class(Dummy).copy({"t": [5, 6]}).t == (5, 6)
+    with pytest.raises(TypeError, match="does not match"):
+        Lazy.from_class(Dummy, t=[3, 4]).signature
+    with pytest.raises(TypeError, match="does not match"):
+        Lazy.from_class(Dummy).copy({"t": [5, 6]}).signature
 
 
 def test_Lazy_type_annotations_are_validated_against_values():
@@ -929,89 +989,6 @@ def test_copy_with_an_empty_group_is_not_a_no_op():
         Lazy.from_class(DummyNested).copy({"c": {}})
 
 
-def test_Lazy_copy_limits_a_class_switch_to_what_is_allowed():
-    class Other(Parsable):
-        def __init__(self, z: int = 1):
-            pass
-
-    with pytest.raises(TypeError, match="not one of DummyNested"):
-        Lazy.from_class(DummyNested).copy({"_class": Other}, allowed=(DummyNested,))
-
-    class Sub(DummyNested):
-        pass
-
-    switched = Lazy.from_class(DummyNested).copy(
-        {"_class": Sub}, allowed=(DummyNested,)
-    )
-    assert switched.cls is Sub
-    assert switched == Lazy.from_class(Sub)
-
-    with pytest.raises(TypeError, match="not one of Other"):
-        Lazy.from_class(DummyNested).copy({"_class": Sub}, allowed=(Other,))
-
-    class Holder(Parsable):
-        def __init__(self, inner: DummyNested = DummyNested.as_lazy()):
-            pass
-
-    # `allowed` applies to a nested `_class` too, not only the node copy()
-    # was called on, and to a built object as well as a configuration.
-    with pytest.raises(TypeError, match="not one of Other"):
-        Holder.as_lazy().copy({"inner._class": Sub}, allowed=(Other,))
-    with pytest.raises(TypeError, match="not one of Other"):
-        Holder().copy({"inner._class": Sub}, allowed=(Other,))
-
-
-def test_a_nested_subclass_round_trips_and_keeps_shared_values():
-    class Base(Parsable):
-        def __init__(self, x: int = 1):
-            pass
-
-    class Sub(Base):
-        def __init__(self, x: int = 1, y: int = 2):
-            pass
-
-    class Outer(Parsable):
-        def __init__(self, inner: Base = Base.as_lazy()):
-            pass
-
-    config = Outer.as_lazy(inner=Sub.as_lazy(x=3, y=4))
-    # The classes are local, so the tag has to be the class itself; an import
-    # path would have nothing to import. Files use the string form.
-    assert Outer.from_dict(config.to_dict(class_tag=True)) == config
-
-    switched = Outer.as_lazy(inner=Base.as_lazy(x=8)).copy(
-        {"inner._class": Sub, "inner.y": 9}
-    )
-    assert switched.inner.cls is Sub
-    assert switched.inner.x == 8
-    assert switched.inner.y == 9
-
-
-def test_a_class_switch_uses_the_new_defaults():
-    class Adam(Parsable):
-        def __init__(self, lr: float = 1e-3):
-            pass
-
-    class AdamW(Adam):
-        def __init__(self, lr: float = 1e-4, wd: float = 0.01):
-            pass
-
-    class Params(Parsable):
-        def __init__(self, opt: Adam = Adam.as_lazy()):
-            pass
-
-    # Untouched values take the subclass defaults, not the base defaults.
-    switched = Params.as_lazy().copy({"opt._class": AdamW})
-    assert switched.opt.cls is AdamW
-    assert switched.opt.lr == 1e-4
-    assert switched.opt.wd == 0.01
-
-    # A value that was actually set on the base is kept.
-    overridden = Params.as_lazy(opt=Adam.as_lazy(lr=0.5)).copy({"opt._class": AdamW})
-    assert overridden.opt.lr == 0.5
-    assert overridden.opt.wd == 0.01
-
-
 def test_varargs_are_not_recorded_and_do_not_crash():
     class WithKwargs(Parsable):
         def __init__(self, n: int = 1, **kwargs):
@@ -1046,27 +1023,60 @@ def test_varargs_cannot_be_stored_in_a_strict_configuration():
         Lazy.from_class(WithArgs, 1, 2).signature
 
 
+def test_constructing_a_Parsable_does_not_validate_the_default():
+    class Dummy(Parsable):
+        def __init__(self, a: str = 1):  # type: ignore[assignment]
+            self.a = a
+
+    built = Dummy(a="ok")
+    assert built.a == "ok"
+    with pytest.raises(TypeError, match="does not match"):
+        built.as_lazy().signature
+
+
+def test_a_quoted_self_reference_is_skipped():
+    class Node(Parsable):
+        def __init__(self, child: "Node", n: int = 1, title: str = "data"):
+            self.child = child
+            self.n = n
+            self.title = title
+
+    leaf = Node(child=None, n=2)
+    assert leaf.child is None
+    assert leaf.n == 2
+    assert leaf.title == "data"
+    # `child` is text, so it is not configurable. `n` and `title` are.
+    assert leaf.as_lazy().signature == {"n": (int, 2), "title": (str, "data")}
+
+
 def test_a_self_reference_is_reported_instead_of_recursing():
-    module = ModuleType("cycle")
-    exec(
-        "from __future__ import annotations\n"
-        "from parsonaut import Parsable\n"
-        "class Node(Parsable):\n"
-        "    def __init__(self, child: Node, n: int = 1):\n"
-        "        pass\n"
-        "class A(Parsable):\n"
-        "    def __init__(self, other: B):\n"
-        "        pass\n"
-        "class B(Parsable):\n"
-        "    def __init__(self, other: A):\n"
-        "        pass\n",
-        module.__dict__,
-    )
+    class Node(Parsable):
+        pass
+
+    def _init_node(self, child: Node, n: int = 1):
+        pass
+
+    Node.__init__ = _init_node
+
+    class A(Parsable):
+        pass
+
+    class B(Parsable):
+        pass
+
+    def _init_a(self, other: B):
+        pass
+
+    def _init_b(self, other: A):
+        pass
+
+    A.__init__ = _init_a
+    B.__init__ = _init_b
 
     with pytest.raises(TypeError, match="Node -> Node refers to itself"):
-        module.Node.as_lazy().signature
+        Node.as_lazy().signature
     with pytest.raises(TypeError, match="A -> B -> A refers to itself"):
-        module.A.as_lazy().signature
+        A.as_lazy().signature
 
 
 def test_to_eager_names_the_values_it_is_missing():

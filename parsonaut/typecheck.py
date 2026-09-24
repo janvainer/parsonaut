@@ -1,12 +1,8 @@
+from dataclasses import dataclass
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Literal as TypingLiteral, Union, get_args, get_origin
 
 BASIC_TYPES = (int, float, bool, str)
-
-#: Spellings the command line accepts for a bool. YAML leaves these as text;
-#: a bool field accepts them when the value is checked against its annotation.
-BOOL_TRUE_FLAGS = ("yes", "true", "t", "y", "1")
-BOOL_FALSE_FLAGS = ("no", "false", "f", "n", "0")
 
 
 class MissingType:
@@ -35,23 +31,6 @@ class MissingType:
 Missing = MissingType()
 
 
-def coerce_bool(value: Any) -> Any:
-    """Return a bool when `value` is one, or a bool written as text.
-
-    Anything else is returned unchanged, so the caller's own type check can
-    reject it.
-    """
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        token = value.lower()
-        if token in BOOL_TRUE_FLAGS:
-            return True
-        if token in BOOL_FALSE_FLAGS:
-            return False
-    return value
-
-
 def _is_instance_of_basic(value: Any, basic_typ) -> bool:
     """`isinstance`, except that a bool is not accepted as an int.
 
@@ -61,56 +40,6 @@ def _is_instance_of_basic(value: Any, basic_typ) -> bool:
     if basic_typ is not bool and isinstance(value, bool):
         return False
     return isinstance(value, basic_typ)
-
-
-def is_basic_type(typ: Any, value: Any = Missing) -> bool:
-    """Is `typ` one of int, float, bool or str, and does `value` fit it?
-
-    Args:
-        typ: The type to check.
-        value: The value to check against the type. Defaults to `Missing`, in
-            which case only the type is checked.
-    """
-    if typ not in BASIC_TYPES:
-        return False
-    return value is Missing or _is_instance_of_basic(value, typ)
-
-
-def is_flat_tuple_type(typ: Any, value: Any = Missing) -> bool:
-    """Check if `typ` is a flat tuple type, optionally validate a value against it.
-
-    The inner type must be one of the basic types - int, float, bool or str.
-    If more inner type values are provided, they must all be of the same type.
-
-    Examples of passing inputs:
-
-            - tuple[int, int], (1, 2)
-            - tuple[int, ...], (1, 2, 3)
-
-    Examples of failing inputs:
-
-            - tuple[int, str], (1, 2)
-            - tuple[int, int], (1, 2, 3)
-
-    Args:
-        typ: The type to check.
-        value (Any, optional): The value to compare against the type.
-            Defaults to `Missing`, in which case only the type is checked.
-
-    Returns:
-        bool: True if the type is a flat tuple type, False otherwise.
-    """
-    args = get_args(typ)
-
-    if value is Missing:
-        return _is_flat_tuple_type(typ, args)
-    else:
-        return (
-            isinstance(value, tuple)
-            and _is_flat_tuple_type(typ, args)
-            and (len(args) == len(value) or Ellipsis in args)
-            and all(_is_instance_of_basic(item, args[0]) for item in value)
-        )
 
 
 def is_union_type(typ: Any) -> bool:
@@ -132,13 +61,19 @@ def union_allows_none(typ: Any) -> bool:
 def optional_inner_type(typ: Any) -> tuple[bool, Any]:
     """Unwrap `Optional[T]`.
 
-    Returns `(True, T)` if `typ` is `Union[T, None]` with a single non-`None`
-    member, and `(False, typ)` otherwise. Whether a value fits is a separate
-    question, answered by :func:`is_parsable_type`.
+    Returns `(True, T)` if `typ` is `T | None`. `T` may itself be a union of
+    `Literal`s of one basic type, as in `Literal["a"] | Literal["b"] | None`.
+    Otherwise returns `(False, typ)`. Whether a value fits is a separate
+    question, answered by :func:`classify`.
     """
     members = get_union_members(typ)
-    if union_allows_none(typ) and len(members) == 1:
+    if not (union_allows_none(typ) and members):
+        return False, typ
+    if len(members) == 1:
         return True, members[0]
+    inner = _union_of(members)
+    if _literal_choices(inner) is not None:
+        return True, inner
     return False, typ
 
 
@@ -155,53 +90,184 @@ def _is_flat_tuple_type(typ: Any, args):
     )
 
 
-def is_parsable_type(typ: Any, value: Any = Missing) -> bool:
-    """Can a configuration record a `typ` parameter, and does `value` fit it?
+def _flatten_literal(typ: Any) -> tuple[Any, ...]:
+    flat: list[Any] = []
+    for arg in get_args(typ):
+        if get_origin(arg) is TypingLiteral:
+            flat.extend(_flatten_literal(arg))
+        else:
+            flat.append(arg)
+    return tuple(flat)
 
-    Args:
-        typ: The type to check.
-        value (Any, optional): The value to check against.
-            Defaults to `Missing`, in which case only the type is checked.
 
-    Returns:
-        bool: True if the type is parsable, False otherwise.
+def _basic_kind(value: Any) -> type | None:
+    """The basic type of `value`, with a bool kept distinct from an int."""
+    if isinstance(value, bool):
+        return bool
+    if isinstance(value, int):
+        return int
+    if isinstance(value, float):
+        return float
+    if isinstance(value, str):
+        return str
+    return None
+
+
+def _union_of(members: tuple[Any, ...]) -> Any:
+    out = members[0]
+    for member in members[1:]:
+        out = out | member
+    return out
+
+
+def _literal_parts(typ: Any) -> tuple[Any, ...] | None:
+    """The `Literal`s in `typ` when it is one literal, or a union of them."""
+    if get_origin(typ) is TypingLiteral:
+        return (typ,)
+    if is_union_type(typ) and not union_allows_none(typ):
+        members = get_union_members(typ)
+        if members and all(get_origin(member) is TypingLiteral for member in members):
+            return members
+    return None
+
+
+def _literal_choices(typ: Any) -> tuple[Any, ...] | None:
+    """Values of a `Literal` whose members are one basic type, or `None`.
+
+    `Literal["a"] | Literal["b"]` is the same set of choices as
+    `Literal["a", "b"]`. A mix of basic types is not.
     """
+    parts = _literal_parts(typ)
+    if parts is None:
+        return None
+    flat: list[Any] = []
+    for part in parts:
+        flat.extend(_flatten_literal(part))
+    choices: list[Any] = []
+    seen: set[tuple[type, Any]] = set()
+    for item in flat:
+        key = (type(item), item)
+        if key not in seen:
+            seen.add(key)
+            choices.append(item)
+    if not choices:
+        return None
+    kind = _basic_kind(choices[0])
+    if kind is None or any(_basic_kind(item) is not kind for item in choices):
+        return None
+    return tuple(choices)
+
+
+@dataclass(frozen=True)
+class Basic:
+    """`int`, `float`, `bool`, or `str`."""
+
+    typ: type
+
+    def accepts(self, value: Any) -> bool:
+        return value is Missing or _is_instance_of_basic(value, self.typ)
+
+
+@dataclass(frozen=True)
+class Tuple:
+    """A flat tuple of one basic type. `length` is `...` when the tuple is open."""
+
+    typ: type
+    length: Any
+
+    def accepts(self, value: Any) -> bool:
+        if value is Missing:
+            return True
+        return (
+            isinstance(value, tuple)
+            and (self.length is Ellipsis or len(value) == self.length)
+            and all(_is_instance_of_basic(item, self.typ) for item in value)
+        )
+
+
+@dataclass(frozen=True)
+class Literal:
+    """One basic type, and the values a parameter may take."""
+
+    typ: type
+    choices: tuple
+
+    def accepts(self, value: Any) -> bool:
+        if value is Missing:
+            return True
+        return any(
+            type(value) is type(choice) and value == choice for choice in self.choices
+        )
+
+
+@dataclass(frozen=True)
+class Optional:
+    """A leaf that may also be `None`. A node is never optional."""
+
+    inner: Basic | Tuple | Literal
+
+    def accepts(self, value: Any) -> bool:
+        return value is None or value is Missing or self.inner.accepts(value)
+
+
+@dataclass(frozen=True)
+class Node:
+    """A nested configuration. `cls` is the class the node builds."""
+
+    cls: type | None
+
+
+def _node(typ: Any) -> Node | None:
+    from .lazy import Lazy
+    from .parsable import Parsable
+
+    if get_origin(typ) is Lazy:
+        args = get_args(typ)
+        cls = None
+        if args and isinstance(args[0], type) and get_origin(args[0]) is None:
+            cls = args[0]
+        return Node(cls)
+    if (
+        isinstance(typ, type)
+        and get_origin(typ) is None
+        and issubclass(typ, (Lazy, Parsable))
+    ):
+        return Node(typ if issubclass(typ, Parsable) else None)
+    return None
+
+
+def classify(typ: Any) -> Basic | Tuple | Literal | Optional | Node | None:
+    """The grammar production `typ` belongs to, or `None` when it is not one.
+
+    `Model | None` and `Model | Other` raise. A node is always present.
+    """
+    if is_union_type(typ):
+        members = get_union_members(typ)
+        if any(_node(member) is not None for member in members):
+            kind = (
+                "optional nested configs"
+                if union_allows_none(typ)
+                else "unions of nested configs"
+            )
+            raise TypeError(f"{kind} are not supported")
+
     is_optional, inner = optional_inner_type(typ)
-    if is_optional and value is None:
-        # `None` is a legal value for `Optional[T]`, so only the type is checked.
-        value = Missing
-    return is_basic_type(inner, value) or is_flat_tuple_type(inner, value)
+    if is_optional:
+        leaf = classify(inner)
+        if isinstance(leaf, (Basic, Tuple, Literal)):
+            return Optional(leaf)
+        return None
 
+    if typ in BASIC_TYPES:
+        return Basic(typ)
 
-def get_flat_tuple_inner_type(typ: Any) -> tuple[Any, int]:
-    """
-    Get the inner type and length of a flat tuple.
-
-    The length is -1 if the tuple has an ellipsis,
-    indicating that it can have any number of elements.
-
-    Args:
-        typ: The type of the tuple.
-
-    Returns:
-        tuple[Any, int]: The inner type and length of the flat tuple.
-
-    Raises:
-        TypeError: If the type is not a valid flat tuple type.
-
-    """
     args = get_args(typ)
-    if not args:
-        raise TypeError(f"{typ} must have at least one inner type.")
+    if _is_flat_tuple_type(typ, args):
+        length = Ellipsis if Ellipsis in args else len(args)
+        return Tuple(args[0], length)
 
-    basetype = args[0]
-    if basetype not in BASIC_TYPES:
-        raise TypeError(f"The inner type of {typ} must be one of {BASIC_TYPES}.")
-    if Ellipsis in args:
-        if len(args) != 2:
-            raise TypeError(f"{typ}: an ellipsis must be the second argument.")
-        return basetype, -1
+    choices = _literal_choices(typ)
+    if choices is not None:
+        return Literal(type(choices[0]), choices)
 
-    if any(subt != basetype for subt in args):
-        raise TypeError(f"{typ}: all inner types must be the same.")
-    return basetype, len(args)
+    return _node(typ)

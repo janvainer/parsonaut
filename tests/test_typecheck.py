@@ -1,123 +1,95 @@
 from itertools import combinations
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import pytest
 
 from parsonaut.typecheck import (
     BASIC_TYPES,
-    get_flat_tuple_inner_type,
-    is_basic_type,
-    is_flat_tuple_type,
-    is_parsable_type,
+    Basic,
+    Literal as LiteralForm,
+    Missing,
+    Optional as OptionalForm,
+    Tuple,
+    classify,
     optional_inner_type,
 )
 
 
+def _fits(typ, value=Missing) -> bool:
+    form = classify(typ)
+    return isinstance(form, (Basic, Tuple, LiteralForm, OptionalForm)) and form.accepts(
+        value
+    )
+
+
 @pytest.mark.parametrize("typ", BASIC_TYPES)
-def test_is_basic_type_accepts_its_own_values(typ):
-    assert is_basic_type(typ)
-    assert is_basic_type(typ, typ())
+def test_classify_accepts_a_basic_type(typ):
+    assert classify(typ) == Basic(typ)
+    assert _fits(typ, typ())
 
 
-def test_is_basic_type_rejects_other_types_and_values():
-    assert not is_basic_type(list)
-    assert not is_basic_type(tuple[int, ...])
-    assert not is_basic_type(float, 1)
-    assert not is_basic_type(str, 1)
-    assert not is_basic_type(int, 1.0)
+def test_classify_rejects_a_basic_value_of_the_wrong_type():
+    assert classify(list) is None
+    assert classify(tuple[int, ...]) == Tuple(int, ...)
+    assert not _fits(float, 1)
+    assert not _fits(str, 1)
+    assert not _fits(int, 1.0)
 
 
-def test_is_basic_type_does_not_take_a_bool_for_an_int():
+def test_classify_does_not_take_a_bool_for_an_int():
     # A bool is not accepted as an int, even though isinstance(True, int) is.
-    assert is_basic_type(bool, True)
-    assert not is_basic_type(int, True)
-    assert not is_basic_type(bool, 1)
+    assert _fits(bool, True)
+    assert not _fits(int, True)
+    assert not _fits(bool, 1)
 
 
-@pytest.mark.parametrize(
-    "inner_typ",
-    BASIC_TYPES,
-)
-def test_is_flat_tuple_type_accepts_base_types(
-    inner_typ,
-):
-    assert is_flat_tuple_type(tuple[inner_typ])
-    assert is_flat_tuple_type(tuple[inner_typ, inner_typ])
-    assert is_flat_tuple_type(tuple[inner_typ, ...])
+@pytest.mark.parametrize("inner_typ", BASIC_TYPES)
+def test_classify_accepts_a_flat_tuple(inner_typ):
+    assert classify(tuple[inner_typ]) == Tuple(inner_typ, 1)
+    assert classify(tuple[inner_typ, inner_typ]) == Tuple(inner_typ, 2)
+    assert classify(tuple[inner_typ, ...]) == Tuple(inner_typ, ...)
 
     val = inner_typ()
-    assert is_flat_tuple_type(tuple[inner_typ], (val,))
-    assert is_flat_tuple_type(tuple[inner_typ, inner_typ], (val, val))
-    assert is_flat_tuple_type(tuple[inner_typ, ...], (val,))
-    assert is_flat_tuple_type(tuple[inner_typ, ...], (val, val, val))
+    assert _fits(tuple[inner_typ], (val,))
+    assert _fits(tuple[inner_typ, inner_typ], (val, val))
+    assert _fits(tuple[inner_typ, ...], (val,))
+    assert _fits(tuple[inner_typ, ...], (val, val, val))
 
 
-@pytest.mark.parametrize(
-    ("typ1", "typ2"),
-    list(combinations(BASIC_TYPES, 2)),
-)
-def test_is_flat_tuple_type_rejects_mixed_types(typ1, typ2):
-    assert not is_flat_tuple_type(tuple[typ1, typ2])
+@pytest.mark.parametrize(("typ1", "typ2"), list(combinations(BASIC_TYPES, 2)))
+def test_classify_rejects_a_mixed_tuple(typ1, typ2):
+    assert classify(tuple[typ1, typ2]) is None
 
 
-def test_is_flat_tuple_type_rejects_empty_tuple():
-    assert not is_flat_tuple_type(tuple)
-    # `tuple[()]` has a tuple origin but no arguments to inspect.
-    assert not is_flat_tuple_type(tuple[()])
-    assert not is_flat_tuple_type(tuple[()], ())
+def test_classify_rejects_an_empty_tuple():
+    assert classify(tuple) is None
+    assert classify(tuple[()]) is None
 
 
-def test_is_flat_tuple_type_rejects_non_tuple():
-    assert not is_flat_tuple_type(list[int])
-    assert not is_flat_tuple_type(int)
+def test_classify_rejects_a_nested_tuple():
+    assert classify(tuple[tuple[int, int, int]]) is None
+    assert classify(list[int]) is None
 
 
-def test_is_flat_tuple_type_rejects_nested_tuple():
-    assert not is_flat_tuple_type(tuple[tuple[int, int, int]])
+def test_classify_rejects_bools_for_an_int_tuple():
+    assert not _fits(tuple[int, ...], (True, False))
+    assert _fits(tuple[bool, ...], (True, False))
 
 
-def test_is_flat_tuple_type_rejects_bools_for_int():
-    # Same asymmetry as is_basic_type: a bool must not pass as an int.
-    assert not is_flat_tuple_type(tuple[int, ...], (True, False))
-    assert is_flat_tuple_type(tuple[bool, ...], (True, False))
+def test_classify_rejects_a_tuple_value_of_the_wrong_shape():
+    assert not _fits(tuple[int], (1.0,))
+    assert not _fits(tuple[int], tuple())
+    assert not _fits(tuple[int], (1, 1))
+    assert not _fits(tuple[int, int], (1, 1.0))
+    assert not _fits(tuple[int, ...], (1, 1.0))
 
 
-def test_is_flat_tuple_type_rejects_mismatched_values():
-    assert not is_flat_tuple_type(tuple[int], (1.0,))
-    assert not is_flat_tuple_type(tuple[int], tuple())
-    assert not is_flat_tuple_type(tuple[int], (1, 1))
-    assert not is_flat_tuple_type(tuple[int, int], (1, 1.0))
-    assert not is_flat_tuple_type(tuple[int, ...], (1, 1.0))
-
-
-def test_get_flat_tuple_inner_type_accepted_cases():
-    assert get_flat_tuple_inner_type(tuple[int]) == (int, 1)
-    assert get_flat_tuple_inner_type(tuple[int, int]) == (int, 2)
-    assert get_flat_tuple_inner_type(tuple[int, int, int]) == (int, 3)
-    assert get_flat_tuple_inner_type(tuple[int, ...]) == (int, -1)
-
-
-def test_get_flat_tuple_inner_type_raises_on_invalid_cases():
-    with pytest.raises(TypeError, match="at least one inner type"):
-        get_flat_tuple_inner_type(tuple)
-
-    # A tuple of tuples is not flat, so `is_flat_tuple_type` never offers one.
-    with pytest.raises(TypeError, match="inner type"):
-        get_flat_tuple_inner_type(tuple[tuple[int, int], ...])
-
-    with pytest.raises(TypeError, match="all inner types must be the same"):
-        get_flat_tuple_inner_type(tuple[str, int])
-
-
-@pytest.mark.parametrize(
-    "typ",
-    BASIC_TYPES,
-)
-def test_is_parsable_type_accepts(typ):
-    assert is_parsable_type(typ)
-    assert is_parsable_type(tuple[typ])
-    assert is_parsable_type(tuple[typ, typ])
-    assert is_parsable_type(tuple[typ, ...])
+@pytest.mark.parametrize("typ", BASIC_TYPES)
+def test_classify_accepts_the_leaves(typ):
+    assert isinstance(classify(typ), Basic)
+    assert isinstance(classify(tuple[typ]), Tuple)
+    assert isinstance(classify(tuple[typ, typ]), Tuple)
+    assert isinstance(classify(tuple[typ, ...]), Tuple)
 
 
 @pytest.mark.parametrize(
@@ -152,5 +124,55 @@ def test_optional_inner_type(typ, expected):
         (Union[int, str], "hello", False),
     ],
 )
-def test_is_parsable_type_checks_values_against_optionals(typ, value, expected):
-    assert is_parsable_type(typ, value) is expected
+def test_classify_checks_values_against_optionals(typ, value, expected):
+    assert _fits(typ, value) is expected
+
+
+@pytest.mark.parametrize(
+    ("typ", "value"),
+    [
+        (Literal["train", "eval"], "train"),
+        (Literal[1, 2, 3], 2),
+        (Literal[1.0, 2.5], 2.5),
+        (Literal[False, True], False),
+        (Literal[Literal["a"], "b"], "b"),
+        (Literal["a"] | Literal["b"], "b"),
+    ],
+)
+def test_classify_accepts_a_literal_of_one_basic_type(typ, value):
+    form = classify(typ)
+    assert isinstance(form, LiteralForm)
+    assert form.accepts(value)
+    assert form.typ is type(value)
+    assert value in form.choices
+
+
+def test_classify_rejects_a_literal_value_of_a_different_type():
+    # `1 == 1.0` and `True == 1`, so the type has to be part of the check.
+    assert not _fits(Literal[1, 2], 1.0)
+    assert not _fits(Literal[1.0, 2.0], 1)
+    assert not _fits(Literal[1, 2], True)
+    assert not _fits(Literal[True], 1)
+    assert not _fits(Literal["a", "b"], "c")
+
+
+def test_classify_rejects_a_mixed_literal():
+    assert classify(Literal["a", 1]) is None
+    assert classify(Literal[b"a"]) is None
+    assert classify(int) == Basic(int)
+
+
+@pytest.mark.parametrize(
+    "typ, value, expected",
+    [
+        (Literal["a", "b"] | None, None, True),
+        (Literal["a", "b"] | None, "a", True),
+        (Literal["a", "b"] | None, "c", False),
+        (Literal["a"] | Literal["b"] | None, None, True),
+        (Literal["a"] | Literal["b"] | None, "b", True),
+        (Literal["a"] | Literal["b"] | None, "c", False),
+        (Literal[1, 2], 1, True),
+    ],
+)
+def test_classify_accepts_an_optional_literal(typ, value, expected):
+    assert _fits(typ, value) is expected

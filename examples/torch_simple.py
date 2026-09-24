@@ -23,7 +23,7 @@ from parsonaut import Parsable
 class Model(nn.Module, Parsable):
     def __init__(
         self,
-        # Use str, int, float, bool, or tuple of those
+        # str, int, float, bool, Literal, or a tuple of the basic types
         in_channels: int = 4,
         out_channels: int = 2,
     ):

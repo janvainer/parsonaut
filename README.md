@@ -92,8 +92,9 @@ opt:                      # or nested
 ```
 
 Only the keys you care about have to be present, and a key that does not match
-any argument is an error rather than a typo that silently does nothing. A
-`_class` tag may name the class already at that node, or a subclass of it. Pass
+any argument is an error rather than a typo that silently does nothing. The
+class at each node is fixed in Python, and a file does not name one. Load it
+with that class, for example `Model.from_file(path)`. Pass
 `ArgumentParser(config_flag="--cfg")` to rename the flag, or `config_flag=None`
 to remove it.
 

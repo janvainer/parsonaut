@@ -3,8 +3,8 @@ from inspect import signature
 from typing import Any, Callable, TypeVar, cast, overload
 
 from .dicts import flatten_dict
-from .lazy import TYPE_NAME, Lazy, new_lazy
-from .serialization import Serializable, maybe_import, open_best
+from .lazy import Lazy, new_lazy
+from .serialization import Serializable, open_best
 
 T = TypeVar("T", bound="Parsable")
 
@@ -119,48 +119,29 @@ class Parsable(Serializable, metaclass=ParsableMeta):
             )
         return self
 
-    def copy(
-        self: T,
-        fields: dict | None = None,
-        allowed: tuple[type, ...] = (),
-    ) -> Lazy[T]:
+    def copy(self: T, fields: dict | None = None) -> Lazy[T]:
         """This configuration with `fields` changed.
 
         Always returns a configuration, whether it is called on one or on a
         built object - nothing is copied out of a live object except the
         arguments it was built with. Call `to_eager` to build the result.
-        `allowed` restricts which subclasses a `_class` key may name.
         """
-        return cast(Lazy[T], _config_of(self).copy(fields, allowed=allowed))
+        return cast(Lazy[T], _config_of(self).copy(fields))
 
     def to_dict(
         self,
         *,
-        class_tag: bool | str = False,
         flatten: bool = False,
-        tuples_as_lists: bool = False,
         skip_missing: bool = False,
     ):
         return _config_of(self).to_dict(
-            class_tag=class_tag,
             flatten=flatten,
-            tuples_as_lists=tuples_as_lists,
             skip_missing=skip_missing,
         )
 
     @classmethod
     def from_dict(cls: type[T], dct: dict) -> T:  # type: ignore[override]
-        fields = flatten_dict(dct)
-        tag = fields.pop(TYPE_NAME, cls)
-        target = maybe_import(tag, fallback=cls)
-        if target is not cls and not (
-            isinstance(target, type) and issubclass(target, cls)
-        ):
-            raise TypeError(
-                f"Cannot switch the configuration to {getattr(target, '__name__', target)}, "
-                f"which is not one of {cls.__name__}."
-            )
-        return cast(T, Lazy.from_class(target).copy(fields))
+        return cast(T, Lazy.from_class(cls).copy(flatten_dict(dct)))
 
     @classmethod
     def from_file(cls: type[T], path) -> T:

@@ -2,6 +2,7 @@ import argparse
 import io
 import sys
 from argparse import ArgumentTypeError
+from typing import Literal
 
 import pytest
 
@@ -184,6 +185,45 @@ def test_a_bool_option_rejects_a_value_that_is_neither():
 
     with pytest.raises(ArgumentTypeError, match="Boolean value expected"):
         str2bool("maybe")
+
+
+@pytest.mark.parametrize(
+    ("typ", "default", "text", "expected"),
+    [
+        (Literal["train", "eval"], "train", "eval", "eval"),
+        (Literal[1, 2, 3], 1, "2", 2),
+        (Literal[1.0, 2.5], 1.0, "2.5", 2.5),
+        (Literal[False, True], False, "yes", True),
+    ],
+)
+def test_option_of_a_literal(typ, default, text, expected):
+    assert parse_option(typ, default, []) == default
+    assert parse_option(typ, Missing, ["--hello", text]) == expected
+
+
+def test_a_literal_option_rejects_a_value_outside_its_choices():
+    with pytest.raises(SystemExit):
+        parse_option(Literal["train", "eval"], "train", ["--hello", "nope"])
+
+
+def test_a_union_of_literals_is_one_option():
+    typ = Literal["train"] | Literal["eval"]
+    assert parse_option(typ, "train", ["--hello", "eval"]) == "eval"
+    assert parse_option(typ | None, "train", ["--hello"]) is None
+
+
+def test_an_optional_literal_accepts_a_bare_flag_as_none():
+    typ = Literal["train", "eval"] | None
+    assert parse_option(typ, "train", ["--hello"]) is None
+    assert parse_option(typ, None, ["--hello", "eval"]) == "eval"
+
+
+def test_literal_options_are_described_in_help():
+    parser = argparse.ArgumentParser()
+    _add_option(parser, "mode", "train", Literal["train", "eval"])
+
+    help_text = parser.format_help()
+    assert "--mode {train,eval}" in help_text
 
 
 def test_unsupported_option_types_are_reported():
