@@ -9,20 +9,7 @@ from typing import Any, NoReturn
 from .dicts import flatten_dict
 from .lazy import Lazy, apply, is_nested_type
 from .serialization import load_dict
-from .typecheck import (
-    BOOL_FALSE_FLAGS as BOOL_FALSE_FLAGS,
-)
-from .typecheck import (
-    BOOL_TRUE_FLAGS as BOOL_TRUE_FLAGS,
-)
-from .typecheck import (
-    Missing,
-    coerce_bool,
-    get_flat_tuple_inner_type,
-    is_basic_type,
-    is_flat_tuple_type,
-    optional_inner_type,
-)
+from .typecheck import Basic, Literal, Missing, Optional, Tuple, classify
 
 
 class ArgumentParser(_ArgumentParser):
@@ -159,10 +146,7 @@ class ArgumentParser(_ArgumentParser):
             except ValueError as exc:
                 _reraise_with_source(path, exc)
             trees = self._apply_config(path, fields, trees)
-        # A `_class` tag may have switched a node to a subclass whose fields
-        # are not the ones registered above. Rebuild the flags from the tree
-        # that is about to be parsed, so new fields can be overridden and
-        # dropped fields are not written back.
+        # Register again after the config flag, so help lists `--config` first.
         self._install_lazy_options(trees)
         for dest, lzy in trees.items():
             prefix = f"{dest}." if dest is not None else ""
@@ -391,35 +375,50 @@ def _add_argument(parser: _ArgumentParser, *args: Any, **kwargs: Any) -> Action:
 
 def _add_option(parser: _ArgumentParser, name: str, value: Any, typ: Any) -> None:
     flag = f"--{name}"
-    is_optional, typ = optional_inner_type(typ)
+    form = classify(typ)
+    is_optional = isinstance(form, Optional)
+    if is_optional:
+        form = form.inner
     optional_kwargs: dict[str, Any] = dict(nargs="?", const=None) if is_optional else {}
 
-    if is_basic_type(typ):
+    if isinstance(form, Basic):
         _add_argument(
             parser,
             flag,
             dest=name,
-            type=str2bool if typ is bool else typ,
+            type=_scalar_type(form.typ),
             default=value,
-            metavar=typ.__name__,
+            metavar=form.typ.__name__,
             help=_help_for(value),
             **optional_kwargs,
         )
-    elif is_flat_tuple_type(typ):
-        subtyp, nitems = get_flat_tuple_inner_type(typ)
+    elif isinstance(form, Literal):
+        _add_argument(
+            parser,
+            flag,
+            dest=name,
+            # Leave metavar unset so argparse prints the choices, `{a,b}`.
+            type=str2bool if form.typ is bool else form.typ,
+            choices=form.choices,
+            default=value,
+            help=_help_for(value),
+            **optional_kwargs,
+        )
+    elif isinstance(form, Tuple):
         # A fixed-length optional tuple still has to accept a bare flag, which
         # means "set this to None". argparse only allows that when nargs can
         # be empty, so the length is checked once values are present.
-        unbounded = nitems == -1
+        unbounded = form.length is Ellipsis
+        nitems = -1 if unbounded else form.length
         nargs = "*" if unbounded or is_optional else nitems
-        metavar = f"{subtyp.__name__}," if unbounded else f"{subtyp.__name__}"
+        metavar = f"{form.typ.__name__}," if unbounded else f"{form.typ.__name__}"
         _add_argument(
             parser,
             flag,
             dest=name,
             nargs=nargs,
             metavar=metavar,
-            type=subtyp if subtyp is not bool else str2bool,
+            type=form.typ if form.typ is not bool else str2bool,
             default=value if value is Missing or value is None else tuple(value),
             action=_CollectTuple,
             empty=None if is_optional else (),
@@ -435,6 +434,31 @@ def _add_option(parser: _ArgumentParser, name: str, value: Any, typ: Any) -> Non
 
 def _help_for(value: Any) -> str | None:
     return "no default" if value is Missing else None
+
+
+def _scalar_type(typ: Any):
+    """The argparse converter for a basic type."""
+    if typ is bool:
+        return str2bool
+    return typ
+
+
+#: Spellings a command-line flag accepts for a bool. A config file holds a real bool.
+BOOL_TRUE_FLAGS = ("yes", "true", "t", "y", "1")
+BOOL_FALSE_FLAGS = ("no", "false", "f", "n", "0")
+
+
+def coerce_bool(value: Any) -> Any:
+    """Return a bool when `value` is one, or a bool written as flag text."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        token = value.lower()
+        if token in BOOL_TRUE_FLAGS:
+            return True
+        if token in BOOL_FALSE_FLAGS:
+            return False
+    return value
 
 
 class _CollectTuple(Action):

@@ -1,18 +1,12 @@
-import importlib
 import json
 import re
-import sys
 from functools import cache
 from pathlib import Path
-from typing import Any
 
 import yaml
 
 YAML_SUFFIXES = (".yaml", ".yml")
 JSON_SUFFIXES = (".json",)
-
-#: The key a serialized configuration records its class under.
-TYPE_NAME = "_class"
 
 
 class Serializable:
@@ -22,8 +16,6 @@ class Serializable:
     def to_dict(
         self,
         *,
-        class_tag: bool | str = False,
-        tuples_as_lists: bool = False,
         skip_missing: bool = False,
     ) -> dict:
         raise NotImplementedError
@@ -34,20 +26,18 @@ class Serializable:
 
     @classmethod
     def from_file(cls, path):
-        dct = load_dict(path)
         if cls is Serializable:
-            # The caller does not know the class, so read it back from the file.
-            cls = maybe_import(dct[TYPE_NAME])
-        return cls.from_dict(dct)
+            raise TypeError(
+                "Serializable.from_file() cannot choose a class. Call it on "
+                "the class the file configures, for example Model.from_file(path)."
+            )
+        return cls.from_dict(load_dict(path))
 
     def to_file(self, path) -> None:
-        # A file has to name the class it holds and spell tuples as lists to
-        # be readable again, and values that were never set are left out
-        # rather than written as a sentinel neither format can represent.
-        save_dict(
-            self.to_dict(class_tag="str", tuples_as_lists=True, skip_missing=True),
-            path,
-        )
+        # Values that were never set are left out rather than written as a
+        # sentinel neither format can represent. Tuples are stored as lists
+        # by `save_dict`, which is the form both formats can write.
+        save_dict(self.to_dict(skip_missing=True), path)
 
 
 def format_of(path) -> str:
@@ -88,11 +78,32 @@ def load_dict(path) -> dict:
         raise ValueError(
             f"{path}: expected a mapping of values, got {type(dct).__name__}."
         )
-    return dct
+    return _lists_to_tuples(dct)
+
+
+def _tuples_to_lists(value):
+    """Tuples become lists, which is what json and yaml can store."""
+    if isinstance(value, tuple):
+        return [_tuples_to_lists(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _tuples_to_lists(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_tuples_to_lists(item) for item in value]
+    return value
+
+
+def _lists_to_tuples(value):
+    """Lists become tuples. A file written here stored every tuple that way."""
+    if isinstance(value, list):
+        return tuple(_lists_to_tuples(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _lists_to_tuples(item) for key, item in value.items()}
+    return value
 
 
 def save_dict(dct: dict, path) -> None:
     """Write a plain dict as yaml or json, according to the file extension."""
+    dct = _tuples_to_lists(dct)
     is_json = format_of(path) == "json"
     with open_best(path, "w") as f:
         if is_json:
@@ -101,95 +112,6 @@ def save_dict(dct: dict, path) -> None:
             # safe_dump keeps configs readable and loadable by `yaml.safe_load`;
             # it raises instead of emitting `!!python/object` tags.
             yaml.safe_dump(dct, f, sort_keys=True)
-
-
-def maybe_import(cls_or_str: Any, *, fallback: Any = None) -> Any:
-    """Resolve a `module.ClassName` string to the class itself.
-
-    Warning: this imports the named module, so configs should be treated with
-    the same care as any other executable input.
-
-    A class saved from a script is tagged `__main__.ClassName`, which only
-    exists on the process that saved it. `fallback` is the class the caller
-    asked for (as in `Model.from_file`); a nested tag is resolved by finding
-    the one loaded class of that name.
-    """
-    if not isinstance(cls_or_str, str):
-        return cls_or_str
-
-    if "." not in cls_or_str:
-        raise ValueError(
-            "Expected a fully qualified class name such as 'my_module.MyClass', "
-            f"got {cls_or_str!r}."
-        )
-    module_name, class_name = cls_or_str.rsplit(".", 1)
-    if module_name == "__main__":
-        return _import_main_class(class_name, cls_or_str, fallback)
-    try:
-        module = importlib.import_module(module_name)
-        return getattr(module, class_name)
-    except (ImportError, AttributeError) as exc:
-        # A class defined inside a function is tagged `module.Name` but is not
-        # an attribute of that module. The caller already has it in hand.
-        if _is_tagged_class(fallback, module_name, class_name):
-            return fallback
-        raise ImportError(f"Could not import {cls_or_str!r}: {exc}") from exc
-
-
-def _is_tagged_class(cls, module_name: str, class_name: str) -> bool:
-    return (
-        isinstance(cls, type)
-        and cls.__module__ == module_name
-        and cls.__name__ == class_name
-    )
-
-
-def _import_main_class(class_name: str, qualname: str, fallback):
-    main = sys.modules.get("__main__")
-    on_main = getattr(main, class_name, None) if main is not None else None
-    # The running script, or `from train import Model`, binds the name here.
-    if isinstance(on_main, type) and (fallback is None or on_main is fallback):
-        return on_main
-
-    # `import train; train.Model.from_file(...)` names the class to load even
-    # though the file still says `__main__.Model`.
-    if isinstance(fallback, type) and fallback.__name__ == class_name:
-        return fallback
-
-    matches = _classes_named(class_name)
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        modules = ", ".join(sorted({item.__module__ for item in matches}))
-        raise ImportError(
-            f"Could not import {qualname!r}: {class_name} is defined in more "
-            f"than one loaded module ({modules})."
-        )
-    detail = (
-        f"module '__main__' has no attribute {class_name!r}"
-        if not isinstance(on_main, type)
-        else f"module '__main__' has a different {class_name!r}"
-    )
-    raise ImportError(f"Could not import {qualname!r}: {detail}.")
-
-
-def _classes_named(class_name: str) -> list[type]:
-    """Classes defined (not merely re-exported) under `class_name`."""
-    found: list[type] = []
-    seen: set[int] = set()
-    for module in list(sys.modules.values()):
-        if module is None:
-            continue
-        candidate = getattr(module, class_name, None)
-        if (
-            isinstance(candidate, type)
-            and candidate.__name__ == class_name
-            and candidate.__module__ == getattr(module, "__name__", None)
-            and id(candidate) not in seen
-        ):
-            seen.add(id(candidate))
-            found.append(candidate)
-    return found
 
 
 class _ConfigLoader(yaml.SafeLoader):
@@ -217,6 +139,9 @@ def _register_config_resolvers() -> None:
         re.X,
     )
     null_re = re.compile(r"^(?:~|null|Null|NULL)$", re.X)
+    # YAML 1.2 booleans. `yes` and `no` stay text.
+    bool_re = re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$", re.X)
+    _ConfigLoader.add_implicit_resolver("tag:yaml.org,2002:bool", bool_re, list("tTfF"))
     _ConfigLoader.add_implicit_resolver("tag:yaml.org,2002:null", null_re, list("~nN"))
     _ConfigLoader.add_implicit_resolver(
         "tag:yaml.org,2002:int", int_re, list("-+0123456789")

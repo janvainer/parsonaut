@@ -3,8 +3,8 @@ from inspect import signature
 from typing import Any, Callable, TypeVar, cast, overload
 
 from .dicts import flatten_dict
-from .lazy import TYPE_NAME, Lazy, new_lazy
-from .serialization import Serializable, maybe_import, open_best
+from .lazy import Lazy, new_lazy
+from .serialization import Serializable, load_dict
 
 T = TypeVar("T", bound="Parsable")
 
@@ -119,52 +119,45 @@ class Parsable(Serializable, metaclass=ParsableMeta):
             )
         return self
 
-    def copy(
-        self: T,
-        fields: dict | None = None,
-        allowed: tuple[type, ...] = (),
-    ) -> Lazy[T]:
+    def copy(self: T, fields: dict | None = None) -> Lazy[T]:
         """This configuration with `fields` changed.
 
         Always returns a configuration, whether it is called on one or on a
         built object - nothing is copied out of a live object except the
         arguments it was built with. Call `to_eager` to build the result.
-        `allowed` restricts which subclasses a `_class` key may name.
         """
-        return cast(Lazy[T], _config_of(self).copy(fields, allowed=allowed))
+        return cast(Lazy[T], _config_of(self).copy(fields))
 
     def to_dict(
         self,
         *,
-        class_tag: bool | str = False,
         flatten: bool = False,
-        tuples_as_lists: bool = False,
         skip_missing: bool = False,
     ):
         return _config_of(self).to_dict(
-            class_tag=class_tag,
             flatten=flatten,
-            tuples_as_lists=tuples_as_lists,
             skip_missing=skip_missing,
         )
 
     @classmethod
-    def from_dict(cls: type[T], dct: dict) -> T:  # type: ignore[override]
-        fields = flatten_dict(dct)
-        tag = fields.pop(TYPE_NAME, cls)
-        target = maybe_import(tag, fallback=cls)
-        if target is not cls and not (
-            isinstance(target, type) and issubclass(target, cls)
-        ):
-            raise TypeError(
-                f"Cannot switch the configuration to {getattr(target, '__name__', target)}, "
-                f"which is not one of {cls.__name__}."
-            )
-        return cast(T, Lazy.from_class(target).copy(fields))
+    def from_dict(cls: type[T], dct: dict, *, key: str | None = None) -> T:  # type: ignore[override]
+        """A configuration of this class from `dct`.
+
+        `key` selects a nested node, dotted the same way as a command-line
+        flag (`model.encoder`). The node is read as a configuration of this
+        class; the file does not name one.
+        """
+        if key is not None:
+            dct = _node(dct, key)
+        return cast(T, Lazy.from_class(cls).copy(flatten_dict(dct)))
 
     @classmethod
-    def from_file(cls: type[T], path) -> T:
-        return cast(T, super().from_file(path))
+    def from_file(cls: type[T], path, *, key: str | None = None) -> T:
+        """A configuration of this class from a yaml or json file.
+
+        `key` selects a nested node, as in :meth:`from_dict`.
+        """
+        return cast(T, cls.from_dict(load_dict(path), key=key))
 
     @classmethod
     def parse_args(cls: type[T], *args: Any, **kwargs: Any) -> T:
@@ -174,53 +167,33 @@ class Parsable(Serializable, metaclass=ParsableMeta):
         parser.add_options(cls.as_lazy(*args, **kwargs))
         return cast(T, parser.parse_args())
 
-    # Methods related to torch serialization
-    @classmethod
-    def from_checkpoint(
-        cls: type[T], pth, map_location=None, weights_only=True, **kwargs
-    ) -> T:
-        """Build the saved configuration and load `weights.pt` into it.
 
-        `kwargs` are passed to the constructor, for arguments a configuration
-        cannot record (an optimizer's `params`, an activation module, ...).
-        They override values read from the file.
-        """
-        torch = _torch(f"Loading {cls.__name__} from a checkpoint")
+def _node(dct: dict, key: str) -> dict:
+    """The mapping at the dotted `key`.
 
-        pth = str(pth).rstrip("/")
-        obj = cls.from_file(f"{pth}/config.yaml").to_eager(**kwargs)
-        load_state_dict = _state_api(obj, "load_state_dict")
-
-        with open_best(f"{pth}/weights.pt", "rb") as f:
-            state_dict = torch.load(
-                f, map_location=map_location, weights_only=weights_only
-            )
-        load_state_dict(state_dict)
-        return obj
-
-    def to_checkpoint(self, pth) -> None:
-        torch = _torch(f"Saving {type(self).__name__} to a checkpoint")
-        state_dict = _state_api(self, "state_dict")
-
-        pth = str(pth).rstrip("/")
-        self.to_file(f"{pth}/config.yaml")
-        with open_best(f"{pth}/weights.pt", "wb") as f:
-            torch.save(state_dict(), f)
-
-
-def _torch(what: str):
-    try:
-        import torch
-    except ImportError as exc:  # pragma: no cover - depends on the environment
-        raise ImportError(f"{what} requires torch to be installed.") from exc
-    return torch
-
-
-def _state_api(obj, method: str) -> Callable:
-    """The state_dict / load_state_dict method torch checkpointing needs."""
-    fn = getattr(obj, method, None)
-    if not callable(fn):
-        raise TypeError(
-            f"Checkpointing {type(obj).__name__} requires a `{method}` method."
+    A file may nest the node or spell it with dots; both name the same path.
+    """
+    if not key or key.startswith(".") or key.endswith(".") or ".." in key:
+        raise ValueError(
+            f"Invalid config key {key!r}. Use a dotted path such as 'model.encoder'."
         )
-    return fn
+
+    flat = flatten_dict(dct)
+    prefix = f"{key}."
+    fields = {
+        name.removeprefix(prefix): value
+        for name, value in flat.items()
+        if name.startswith(prefix)
+    }
+    if key in flat:
+        value = flat[key]
+        if fields:
+            raise ValueError(
+                f"{key!r} is used both as a value and as a group of values."
+            )
+        if isinstance(value, dict):
+            return value
+        raise ValueError(f"{key} is a value ({value!r}), not a nested configuration.")
+    if not fields:
+        raise ValueError(f"Config has no node {key!r}.")
+    return fields

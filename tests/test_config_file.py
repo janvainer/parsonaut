@@ -1,5 +1,6 @@
 import json
 from dataclasses import dataclass
+from typing import Literal
 
 import pytest
 
@@ -14,11 +15,6 @@ class SGD(Parsable):
 
 class Model(Parsable):
     def __init__(self, in_channels: int = 4, out_channels: int = 2):
-        pass
-
-
-class Wide(Model):
-    def __init__(self, in_channels: int = 4, out_channels: int = 2, depth: int = 1):
         pass
 
 
@@ -153,16 +149,11 @@ def test_set_defaults_survives_a_config_file_on_a_reused_parser(config):
     assert parser.parse_args([]).extra == 7
 
 
-def test_config_file_can_specialize_a_nested_class(config):
-    path = config(
-        f"model:\n  _class: {Wide.__module__}.Wide\n  in_channels: 8\n  depth: 5\n"
-    )
+def test_config_file_rejects_a_class_key(config):
+    path = config("model:\n  _class: some.Wide\n  in_channels: 8\n")
 
-    hp = parse(["--config", path])
-    assert hp.model.cls is Wide
-    assert hp.model.in_channels == 8
-    assert hp.model.depth == 5
-    assert hp.model.out_channels == 2
+    with pytest.raises(ValueError, match="field='model._class'"):
+        parse(["--config", path])
 
 
 def test_the_parser_can_be_reused_with_different_config_files(config):
@@ -192,10 +183,10 @@ def test_bad_value_in_a_config_file_names_the_file(config):
         parse(["--config", path])
 
 
-def test_config_file_cannot_switch_the_root_to_an_unrelated_class(config):
-    path = config(f"_class: {__name__}.Model\n")
+def test_config_file_rejects_a_root_class_key(config):
+    path = config("_class: Model\nseed: 7\n")
 
-    with pytest.raises(TypeError, match="Cannot switch the configuration"):
+    with pytest.raises(ValueError, match="field='_class'"):
         parse(["--config", path])
 
 
@@ -284,31 +275,18 @@ def test_parse_args_exposes_the_config_flag(monkeypatch, config):
     assert hp.seed == 8
 
 
-def test_config_file_can_switch_to_a_subclass_with_different_fields(config):
-    path = config(
-        f"model:\n  _class: {Narrow.__module__}.Narrow\n  in_channels: 8\n  depth: 2\n"
-    )
+def test_config_file_does_not_gain_a_subclass_field(config):
+    path = config("model:\n  in_channels: 8\n  depth: 2\n")
 
     parser = ArgumentParser()
     parser.add_options(Box.as_lazy())
 
-    hp = parser.parse_args(["--config", path, "--model.depth", "9"])
-    assert hp.model.cls is Narrow
-    assert hp.model.in_channels == 8
-    assert hp.model.depth == 9
-
-    # A flag that only existed on the base class is no longer an argument.
-    with pytest.raises(SystemExit):
-        parser.parse_args(["--config", path, "--model.out_channels", "3"])
-
-    # The next run, with no file, is the base class again.
-    base = parser.parse_args([])
-    assert base.model.cls is Model
-    assert base.model.out_channels == 2
+    with pytest.raises(ValueError, match="field='model.depth'"):
+        parser.parse_args(["--config", path])
 
 
 def test_yaml_keeps_strings_that_look_like_bools_or_times(config):
-    path = config("country: NO\nflag: yes\nratio: 16:9\nlr: 1.0e-3\nbits: [yes, no]\n")
+    path = config("country: NO\nflag: true\nratio: 16:9\nlr: 1.0e-3\nbits: [true, false]\n")
 
     parser = ArgumentParser()
     parser.add_options(Labeled.as_lazy())
@@ -319,6 +297,37 @@ def test_yaml_keeps_strings_that_look_like_bools_or_times(config):
     assert hp.ratio == "16:9"
     assert hp.lr == 0.001
     assert hp.bits == (True, False)
+
+
+class Run(Parsable):
+    def __init__(
+        self,
+        mode: Literal["train", "eval"] = "train",
+        label: Literal["yes", "no"] = "no",
+    ):
+        pass
+
+
+def test_config_file_sets_a_literal(config):
+    path = config("mode: eval\nlabel: yes\n")
+
+    parser = ArgumentParser()
+    parser.add_options(Run.as_lazy())
+    hp = parser.parse_args(["--config", path, "--mode", "train"])
+
+    # The command line still wins. `yes` stays text: this literal's values are
+    # strings.
+    assert hp.mode == "train"
+    assert hp.label == "yes"
+
+
+def test_bad_literal_in_a_config_file_names_the_file(config):
+    path = config("mode: nope\n")
+
+    parser = ArgumentParser()
+    parser.add_options(Run.as_lazy())
+    with pytest.raises(TypeError, match=r"config\.yaml:"):
+        parser.parse_args(["--config", path])
 
 
 def test_config_flag_appears_in_help():

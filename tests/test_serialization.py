@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -5,12 +6,12 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from parsonaut import Parsable
 from parsonaut.serialization import (
     Serializable,
     format_of,
-    maybe_import,
 )
 
 
@@ -19,17 +20,8 @@ class DummySerializable(Serializable):
     def __init__(self, value):
         self.value = value
 
-    def to_dict(
-        self,
-        *,
-        class_tag=False,
-        tuples_as_lists=False,
-        skip_missing=False,
-    ):
-        d = {"value": self.value}
-        if class_tag:
-            d["_class"] = "test_serialization.DummySerializable"
-        return d
+    def to_dict(self, *, skip_missing=False):
+        return {"value": self.value}
 
     @classmethod
     def from_dict(cls, dct):
@@ -51,9 +43,8 @@ def test_serializable_to_from_json():
         assert isinstance(loaded, DummySerializable)
         assert loaded.value == 123
 
-        loaded = Serializable.from_file(path)
-        assert isinstance(loaded, DummySerializable)
-        assert loaded.value == 123
+        with pytest.raises(TypeError, match="cannot choose a class"):
+            Serializable.from_file(path)
 
 
 def test_serializable_to_from_yaml():
@@ -153,9 +144,22 @@ def test_format_of():
         format_of("config.txt")
 
 
+@pytest.mark.parametrize("extension", ["json", "yaml"])
+def test_a_tuple_is_stored_as_a_list(extension, tmp_path):
+    class Box(Parsable):
+        def __init__(self, xs: tuple[int, int] = (1, 2)):
+            pass
+
+    path = tmp_path / f"box.{extension}"
+    Box.as_lazy(xs=(3, 4)).to_file(path)
+    raw = path.read_text()
+    stored = json.loads(raw) if extension == "json" else yaml.safe_load(raw)
+    assert stored == {"xs": [3, 4]}
+    assert Box.from_file(path).xs == (3, 4)
+
+
 def test_a_config_saved_from_a_script_reloads_via_import(tmp_path):
-    # `python train.py` records `_class: __main__.Model`. Loading has to work
-    # from another file that imported the module, where `__main__` is that file.
+    # The file holds values only. The class is the one `from_file` is called on.
     (tmp_path / "train.py").write_text(
         textwrap.dedent(
             """
@@ -201,14 +205,3 @@ def test_a_config_saved_from_a_script_reloads_via_import(tmp_path):
 
     subprocess.run([sys.executable, "train.py"], cwd=tmp_path, check=True)
     subprocess.run([sys.executable, "eval.py"], cwd=tmp_path, check=True)
-
-
-def test_maybe_import():
-    assert maybe_import(Serializable) is Serializable
-    assert maybe_import("parsonaut.serialization.Serializable") is Serializable
-
-    with pytest.raises(ValueError, match="fully qualified"):
-        maybe_import("Serializable")
-
-    with pytest.raises(ImportError, match="Could not import"):
-        maybe_import("parsonaut.serialization.Nope")

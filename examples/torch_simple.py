@@ -18,12 +18,11 @@ from torch.optim.lr_scheduler import ExponentialLR as ExponentialLR_
 from parsonaut import Parsable
 
 
-# Subclass Parsable to make a class configurable. For torch classes that expose
-# the state_dict API you also get checkpointing for free.
+# Subclass Parsable to make a class configurable.
 class Model(nn.Module, Parsable):
     def __init__(
         self,
-        # Use str, int, float, bool, or tuple of those
+        # str, int, float, bool, Literal, or a tuple of the basic types
         in_channels: int = 4,
         out_channels: int = 2,
     ):
@@ -88,6 +87,3 @@ schedule = hp.schedule.to_eager(optimizer=opt)
 
 print("\nSchedule: \n")
 print(f"{type(schedule).__name__}(gamma={schedule.gamma})")
-
-# We can now do model training etc...
-# Finally, we can call model.to_checkpoint and opt.to_checkpoint

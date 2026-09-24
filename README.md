@@ -10,7 +10,7 @@ Auto-configure (not only) torch experiments from the CLI.
 Parsonaut makes your experiments
 1. **Configurable** - configure any parameter of your experiment from CLI
 2. **Reproducible** - easily store your full experiment configuration to disk
-3. **Boilerplate-free** - make model checkpointing seampless
+3. **Boilerplate-free** - nested objects stay configurations until you build them
 
 ## Quickstart
 
@@ -61,15 +61,18 @@ model = partial_model.to_eager()
 # Training code here ...
 ```
 
-Finally, serialize model configuration AND weights.
-```python
-model.to_checkpoint("ckpt_dir")
-```
-We can now load the experiment configuration and model weights later:
+The same file loads back as a configuration of the class you call it on:
 
 ```python
-model_with_weights = Model.from_checkpoint("ckpt_dir")
 just_config = Model.from_file("model_config.yaml")
+```
+
+A dotted `key` returns one nested node as a configuration of that class. Building
+the object, and loading any weights, stays with the caller:
+
+```python
+encoder = Encoder.from_file("train.yaml", key="model.encoder")
+encoder = encoder.to_eager(num_layers=6)
 ```
 
 ### Config files
@@ -92,8 +95,9 @@ opt:                      # or nested
 ```
 
 Only the keys you care about have to be present, and a key that does not match
-any argument is an error rather than a typo that silently does nothing. A
-`_class` tag may name the class already at that node, or a subclass of it. Pass
+any argument is an error rather than a typo that silently does nothing. The
+class at each node is fixed in Python, and a file does not name one. Load it
+with that class, for example `Model.from_file(path)`. Pass
 `ArgumentParser(config_flag="--cfg")` to rename the flag, or `config_flag=None`
 to remove it.
 
