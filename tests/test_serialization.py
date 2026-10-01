@@ -93,8 +93,8 @@ def test_parsable_serializable_to_from_file(extension):
             obj.to_file(path)
             loaded = ParsableSerializable.from_file(path).to_eager()
             assert isinstance(loaded, ParsableSerializable)
-            assert loaded._cfg.value == 42
-            assert loaded._cfg.value2 == (4, 5, 6)
+            assert loaded.as_lazy().value == 42
+            assert loaded.as_lazy().value2 == (4, 5, 6)
 
 
 @pytest.mark.parametrize("extension", ["json", "yaml"])

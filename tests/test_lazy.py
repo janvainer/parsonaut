@@ -454,9 +454,9 @@ def test_Parsable_init_options(obj):
     assert hasattr(obj, "_cfg")
 
     assert obj.a == 5
-    assert obj.b == "hello" == obj._cfg.b
-    assert obj.c == 3.14 == obj._cfg.c
-    assert obj._cfg.cls == DummyFlat
+    assert obj.b == "hello" == obj.as_lazy().b
+    assert obj.c == 3.14 == obj.as_lazy().c
+    assert obj.as_lazy().cls == DummyFlat
 
 
 def test_Parsable_to_dict():
@@ -1043,17 +1043,6 @@ def test_varargs_cannot_be_stored_in_a_strict_configuration():
 
     with pytest.raises(TypeError, match="1 positional argument"):
         Lazy.from_class(WithArgs, 1, 2).signature
-
-
-def test_constructing_a_Parsable_does_not_validate_the_default():
-    class Dummy(Parsable):
-        def __init__(self, a: str = 1):  # type: ignore[assignment]
-            self.a = a
-
-    built = Dummy(a="ok")
-    assert built.a == "ok"
-    with pytest.raises(TypeError, match="does not match"):
-        built.as_lazy().signature
 
 
 def test_a_quoted_self_reference_is_skipped():

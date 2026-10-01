@@ -13,7 +13,8 @@ class ParsableMeta(ABCMeta):
     def __call__(cls, *args, **kwargs):
         # An object being built may legitimately be handed arguments that a
         # configuration cannot record, so this path does not reject them.
-        cfg = new_lazy(cls, args, kwargs, strict=False)
+        # Plain values, since torch.load cannot restore a Lazy.
+        cfg = new_lazy(cls, args, kwargs, strict=False).to_dict(skip_missing=True)
 
         # The object is allocated and initialized in two steps so that `_cfg` is
         # already available while `__init__` runs.
@@ -87,7 +88,7 @@ def _config_of(obj) -> Lazy:
             "was built with __new__, copied or unpickled), so its "
             "configuration is unavailable."
         )
-    return cfg
+    return type(obj).from_dict(cfg)
 
 
 class Parsable(Serializable, metaclass=ParsableMeta):
@@ -107,7 +108,7 @@ class Parsable(Serializable, metaclass=ParsableMeta):
     itself, for the rest of the :class:`Lazy` API.
     """
 
-    _cfg: Lazy
+    _cfg: dict
 
     as_lazy = _AsLazy()
 
